@@ -646,3 +646,105 @@ app.listen(PORT, () => {
   console.log(`   Agents: ${Object.keys(AGENTS).join(', ')}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
 });
+
+// ==================== TEAMS POLLING ====================
+
+// Track last check time per agent per chat
+const teamsLastCheck = {};
+
+async function pollTeamsMessages() {
+  for (const agent of Object.keys(AGENTS)) {
+    try {
+      const config = AGENTS[agent];
+      const token = await getAccessToken(agent);
+      
+      // Get all chats
+      const chatsResp = await fetch(
+        'https://graph.microsoft.com/v1.0/me/chats',
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+      const chatsData = await chatsResp.json();
+      
+      if (chatsData.error) {
+        console.error(`[${agent}] Error fetching chats:`, chatsData.error.message);
+        continue;
+      }
+      
+      for (const chat of chatsData.value || []) {
+        const chatId = chat.id;
+        
+        // Initialize last check if not exists
+        if (!teamsLastCheck[agent]) teamsLastCheck[agent] = {};
+        const lastCheckTime = teamsLastCheck[agent][chatId] || new Date(Date.now() - 2 * 60 * 1000).toISOString();
+        
+        // Get messages after last check
+        const messagesResp = await fetch(
+          `https://graph.microsoft.com/v1.0/me/chats/${chatId}/messages?$filter=createdDateTime gt ${lastCheckTime}&$orderby=createdDateTime`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        const messagesData = await messagesResp.json();
+        
+        if (messagesData.error) continue;
+        
+        for (const message of messagesData.value || []) {
+          // Skip own messages
+          if (message.from?.user?.displayName?.includes(config.name)) continue;
+          
+          const content = message.body?.content?.replace(/<[^>]*>/g, '').trim() || '';
+          const from = message.from?.user?.displayName || 'Unknown';
+          
+          if (!content) continue;
+          
+          console.log(`[${agent}] Teams message from ${from}: ${content.substring(0, 50)}...`);
+          
+          // Create persistent session key
+          const persistentSessionKey = `teams:chat:${chatId}`;
+          
+          // Format message for agent
+          const replyScript = agent === 'sophia' 
+            ? 'node sophia-teams-reply.js' 
+            : agent === 'kim'
+            ? 'node kim-teams-reply.js'
+            : 'node ~/clawd/max-teams-reply.js';
+          
+          const wakeText = `💬 Teams message from ${from}: "${content}"\n\nChat ID: ${chatId}\n\nPlease respond using:\n${replyScript} "${chatId}" "<your reply in HTML format>"`;
+          
+          // Forward to agent gateway
+          const payload = config.agentId ? {
+            message: wakeText,
+            name: 'Teams',
+            agentId: config.agentId,
+            sessionKey: persistentSessionKey,
+            deliver: true
+          } : {
+            text: wakeText
+          };
+          
+          console.log(`[${agent}] Forwarding to ${config.gatewayUrl}...`);
+          const fwdResp = await fetch(config.gatewayUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${config.gatewayToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+          const result = await fwdResp.text();
+          console.log(`[${agent}] Gateway response: ${result.substring(0, 100)}`);
+          
+          // Update last check time
+          teamsLastCheck[agent][chatId] = message.createdDateTime;
+        }
+      }
+    } catch (error) {
+      console.error(`[${agent}] Teams polling error:`, error.message);
+    }
+  }
+}
+
+// Poll Teams messages every 30 seconds
+setInterval(pollTeamsMessages, 30 * 1000);
+
+// Run immediately on startup after 5 seconds
+setTimeout(pollTeamsMessages, 5000);
+
