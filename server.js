@@ -32,15 +32,8 @@ const AGENTS = {
     gatewayToken: 'sophia-hooks-token-2026',
     agentId: 'sophia'
   },
-  kim: {
-    name: 'Kim',
-    clientId: '076066b8-03bd-4093-9acb-60d46d732d5f',
-    tenantId: '53965fed-1581-4e00-92a7-7bb79806eecd',
-    tokenFile: '/home/lucalicata/clawd/kim-microsoft-tokens.json',
-    gatewayUrl: 'http://localhost:20789/hooks/agent',
-    gatewayToken: 'kim-hooks-token-2026',
-    agentId: 'kim'
-  }
+  // Kim now runs on her own laptop server (192.168.1.145:3007)
+  // https://kim.acuity.expert
 };
 
 // Middleware
@@ -212,6 +205,26 @@ app.post('/api/teams/send', async (req, res) => {
     
     if (response.status === 201) {
       console.log(`[${agent}] Sent Teams message to ${chatId}`);
+      
+      // Update presence to Available after sending message
+      try {
+        await fetch('https://graph.microsoft.com/v1.0/me/presence/setPresence', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            sessionId: `openclaw-${agent}-${Date.now()}`,
+            availability: 'Available',
+            activity: 'Available'
+          })
+        });
+        console.log(`[${agent}] Updated presence to Available`);
+      } catch (presenceError) {
+        console.warn(`[${agent}] Could not update presence:`, presenceError.message);
+      }
+      
       res.json({ success: true });
     } else {
       const error = await response.text();
