@@ -16,27 +16,30 @@ const PORT = 3007;
 const AGENTS = {
   max: {
     name: 'Max',
-    clientId: '79b3f60a-4ac1-40d0-b29d-fd7cea38bd77',
-    tenantId: '982780f8-ff3e-4c01-843a-21e6b41eb64c',
-    tokenFile: path.join(__dirname, 'max-microsoft-tokens.json'),
-    gatewayUrl: 'http://localhost:18789/hooks/wake',
-    gatewayToken: 'b687ba2c3d0e85f85f4eccb56bd798c70504521cc352b7ed'
+    clientId: '79b3f60a-ddfe-4029-8af4-1c95a37c6aa7',
+    tenantId: '982780f8-0424-4e57-9cc0-bee3d6acc797',
+    tokenFile: '/home/lucalicata/clawd/max-microsoft-tokens.json',
+    gatewayUrl: 'http://localhost:18789/hooks/agent',
+    gatewayToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJlNmQ0NzMxNjk0Y2U0MmFmYjkwZWJlNzMzYmU3Nzc1ZSIsImlhdCI6MTc2OTY4NzMxNSwiZXhwIjoyMDg1MDQ3MzE1fQ.Yzz_QkIBbZfdTOEa_qvI_0gCUPfKLFPjYXWjAe_VYVk',
+    agentId: 'max'
   },
   sophia: {
     name: 'Sophia',
     clientId: '50d301c0-ad4f-458b-95ec-f3c966f60f6c',
     tenantId: 'f2b38637-cb43-45b5-a5e8-e7a09fe436bb',
-    tokenFile: path.join(__dirname, 'sophia-microsoft-tokens.json'),
-    gatewayUrl: 'http://localhost:19789/hooks/wake',
-    gatewayToken: 'sophia-hooks-token-2026'
+    tokenFile: '/home/lucalicata/clawd/sophia-microsoft-tokens.json',
+    gatewayUrl: 'http://localhost:19789/hooks/agent',
+    gatewayToken: 'sophia-hooks-token-2026',
+    agentId: 'sophia'
   },
   kim: {
     name: 'Kim',
     clientId: '076066b8-03bd-4093-9acb-60d46d732d5f',
     tenantId: '53965fed-1581-4e00-92a7-7bb79806eecd',
-    tokenFile: path.join(__dirname, 'kim-microsoft-tokens.json'),
-    gatewayUrl: 'http://localhost:20789/hooks/wake',
-    gatewayToken: 'kim-gateway-token-2026'
+    tokenFile: '/home/lucalicata/clawd/kim-microsoft-tokens.json',
+    gatewayUrl: 'http://localhost:20789/hooks/agent',
+    gatewayToken: 'kim-hooks-token-2026',
+    agentId: 'kim'
   }
 };
 
@@ -137,17 +140,39 @@ app.post('/webhook/teams/:agent', async (req, res) => {
         
         console.log(`[${agent}] Teams message from ${from}: ${content.substring(0, 50)}...`);
         
+        // Format message text with agent-specific reply command
+        const replyScript = agent === 'sophia' 
+          ? 'node sophia-teams-reply.js' 
+          : agent === 'kim'
+          ? 'node kim-teams-reply.js'
+          : 'node ~/clawd/max-teams-reply.js';
+        
+        const wakeText = `💬 Teams message from ${from}: "${content}"\n\nChat ID: ${chatId}\n\nPlease respond to this Teams message using:\n${replyScript} "${chatId}" "<your reply in HTML format>"`;
+        
         // Forward to agent gateway
-        await fetch(config.gatewayUrl, {
+        const payload = config.agentId ? {
+          // Max uses /hooks/agent format
+          message: wakeText,
+          name: 'Teams',
+          agentId: config.agentId,
+          sessionKey: 'hook:teams:luca',
+          deliver: true
+        } : {
+          // Other agents use /hooks/wake format
+          text: wakeText
+        };
+        
+        console.log(`[${agent}] Forwarding to ${config.gatewayUrl}...`);
+        const fwdResp = await fetch(config.gatewayUrl, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${config.gatewayToken}`,
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            text: `[Teams message from ${from}]\n\n${content}\n\n---\nChat ID: ${chatId}`
-          })
+          body: JSON.stringify(payload)
         });
+        const fwdResult = await fwdResp.text();
+        console.log(`[${agent}] Gateway response: ${fwdResult.substring(0, 100)}`);
       }
     }
     
@@ -397,17 +422,33 @@ app.post('/webhook/email/:agent', async (req, res) => {
       
       console.log(`[${agent}] New email from ${from}: ${subject}`);
       
+      // Format email notification
+      const wakeText = `📧 New email from ${from}\n\n**Subject:** ${subject}\n**Preview:** ${preview}\n\n---\nEmail ID: ${resourceId}`;
+      
       // Forward to agent gateway
-      await fetch(config.gatewayUrl, {
+      const payload = config.agentId ? {
+        // Agents with /hooks/agent endpoint
+        message: wakeText,
+        name: 'Email',
+        agentId: config.agentId,
+        sessionKey: `hook:email:${resourceId.substring(0, 20)}`,
+        deliver: true
+      } : {
+        // Legacy /hooks/wake endpoint
+        text: wakeText
+      };
+      
+      console.log(`[${agent}] Forwarding email to ${config.gatewayUrl}...`);
+      const fwdResp = await fetch(config.gatewayUrl, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${config.gatewayToken}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          text: `[New email from ${from}]\n\n**Subject:** ${subject}\n**Preview:** ${preview}\n\n---\nEmail ID: ${resourceId}`
-        })
+        body: JSON.stringify(payload)
       });
+      const fwdResult = await fwdResp.text();
+      console.log(`[${agent}] Gateway response: ${fwdResult.substring(0, 100)}`);
     }
     
     res.status(200).send('OK');
