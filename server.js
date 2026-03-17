@@ -639,12 +639,112 @@ app.get('/status/:agent', async (req, res) => {
   }
 });
 
+// ==================== AUTO-RENEWAL ====================
+
+// Store subscription IDs for auto-renewal
+const subscriptions = {
+  // Format: agent: { teams: subscriptionId, email: subscriptionId }
+};
+
+// Auto-renew Teams subscriptions every 45 minutes (before 60min expiry)
+async function autoRenewTeamsSubscriptions() {
+  console.log('[auto-renew] Checking Teams subscriptions...');
+  
+  for (const agent of Object.keys(AGENTS)) {
+    try {
+      const token = await getAccessToken(agent);
+      
+      // List current subscriptions
+      const listResp = await fetch('https://graph.microsoft.com/v1.0/subscriptions', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await listResp.json();
+      
+      // Find Teams subscription for this agent
+      const teamsSub = data.value?.find(s => 
+        s.resource === '/me/chats/getAllMessages' && 
+        s.clientState === `${agent}-teams`
+      );
+      
+      if (teamsSub) {
+        // Renew if expires within 20 minutes
+        const expiresAt = new Date(teamsSub.expirationDateTime);
+        const minutesUntilExpiry = (expiresAt - Date.now()) / 60000;
+        
+        if (minutesUntilExpiry < 20) {
+          console.log(`[${agent}] Teams subscription expires in ${minutesUntilExpiry.toFixed(1)}min, renewing...`);
+          
+          const newExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+          const renewResp = await fetch(
+            `https://graph.microsoft.com/v1.0/subscriptions/${teamsSub.id}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ expirationDateTime: newExpiry })
+            }
+          );
+          
+          if (renewResp.ok) {
+            console.log(`[${agent}] Teams subscription renewed: ${teamsSub.id}`);
+            subscriptions[agent] = { ...subscriptions[agent], teams: teamsSub.id };
+          } else {
+            console.error(`[${agent}] Failed to renew Teams subscription:`, await renewResp.text());
+          }
+        } else {
+          console.log(`[${agent}] Teams subscription OK (${minutesUntilExpiry.toFixed(1)}min remaining)`);
+        }
+      } else {
+        console.log(`[${agent}] No Teams subscription found, creating...`);
+        
+        // Create new subscription
+        const webhookUrl = `https://microsoft.acuity.expert/webhook/teams/${agent}`;
+        const expirationDateTime = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+        
+        const createResp = await fetch('https://graph.microsoft.com/v1.0/subscriptions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            changeType: 'created',
+            notificationUrl: webhookUrl,
+            resource: '/me/chats/getAllMessages',
+            expirationDateTime,
+            clientState: `${agent}-teams`
+          })
+        });
+        
+        if (createResp.ok) {
+          const newSub = await createResp.json();
+          console.log(`[${agent}] Teams subscription created: ${newSub.id}`);
+          subscriptions[agent] = { ...subscriptions[agent], teams: newSub.id };
+        } else {
+          console.error(`[${agent}] Failed to create Teams subscription:`, await createResp.text());
+        }
+      }
+    } catch (error) {
+      console.error(`[${agent}] Auto-renewal error:`, error.message);
+    }
+  }
+}
+
+// Run auto-renewal every 45 minutes
+setInterval(autoRenewTeamsSubscriptions, 45 * 60 * 1000);
+
+// Run immediately on startup
+setTimeout(autoRenewTeamsSubscriptions, 5000);
+
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
   console.log(`✅ Microsoft 365 Integration Server running on port ${PORT}`);
   console.log(`   Agents: ${Object.keys(AGENTS).join(', ')}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
+  console.log(`   Auto-renewal: Teams subscriptions every 45 minutes`);
 });
 
 // ==================== TEAMS POLLING ====================
