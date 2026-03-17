@@ -749,8 +749,8 @@ app.listen(PORT, () => {
 
 // ==================== TEAMS POLLING ====================
 
-// Track last check time per agent per chat
-const teamsLastCheck = {};
+// Track seen message IDs (Microsoft Graph doesn't support filtering chat messages by date)
+const seenMessageIds = new Set();
 
 async function pollTeamsMessages() {
   for (const agent of Object.keys(AGENTS)) {
@@ -773,13 +773,9 @@ async function pollTeamsMessages() {
       for (const chat of chatsData.value || []) {
         const chatId = chat.id;
         
-        // Initialize last check if not exists
-        if (!teamsLastCheck[agent]) teamsLastCheck[agent] = {};
-        const lastCheckTime = teamsLastCheck[agent][chatId] || new Date(Date.now() - 2 * 60 * 1000).toISOString();
-        
-        // Get messages after last check
+        // Get recent messages (top 5) - no filter supported by Microsoft
         const messagesResp = await fetch(
-          `https://graph.microsoft.com/v1.0/me/chats/${chatId}/messages?$filter=createdDateTime gt ${lastCheckTime}&`,
+          `https://graph.microsoft.com/v1.0/me/chats/${chatId}/messages?$top=5`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         );
         const messagesData = await messagesResp.json();
@@ -787,15 +783,20 @@ async function pollTeamsMessages() {
         if (messagesData.error) continue;
         
         for (const message of messagesData.value || []) {
+          // Skip if already processed
+          if (seenMessageIds.has(message.id)) continue;
+          
           // Skip own messages
           if (message.from?.user?.displayName?.includes(config.name)) continue;
           
           const content = message.body?.content?.replace(/<[^>]*>/g, '').trim() || '';
-          const from = message.from?.user?.displayName || 'Unknown';
-          
           if (!content) continue;
           
+          const from = message.from?.user?.displayName || 'Unknown';
           console.log(`[${agent}] Teams message from ${from}: ${content.substring(0, 50)}...`);
+          
+          // Mark as seen
+          seenMessageIds.add(message.id);
           
           // Create persistent session key
           const persistentSessionKey = `teams:chat:${chatId}`;
@@ -831,9 +832,6 @@ async function pollTeamsMessages() {
           });
           const result = await fwdResp.text();
           console.log(`[${agent}] Gateway response: ${result.substring(0, 100)}`);
-          
-          // Update last check time
-          teamsLastCheck[agent][chatId] = message.createdDateTime;
         }
       }
     } catch (error) {
