@@ -679,7 +679,7 @@ async function pollTeamsMessages() {
         
         // Get messages after last check
         const messagesResp = await fetch(
-          `https://graph.microsoft.com/v1.0/me/chats/${chatId}/messages?$filter=createdDateTime gt ${lastCheckTime}&$orderby=createdDateTime`,
+          `https://graph.microsoft.com/v1.0/me/chats/${chatId}/messages?$filter=createdDateTime gt ${lastCheckTime}&`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         );
         const messagesData = await messagesResp.json();
