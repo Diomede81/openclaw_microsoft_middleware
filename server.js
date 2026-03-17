@@ -142,13 +142,17 @@ app.post('/webhook/teams/:agent', async (req, res) => {
         
         const wakeText = `💬 Teams message from ${from}: "${content}"\n\nChat ID: ${chatId}\n\nPlease respond to this Teams message using:\n${replyScript} "${chatId}" "<your reply in HTML format>"`;
         
+        // Create persistent session key based on chatId
+        // This maintains conversation context across messages
+        const persistentSessionKey = `teams:chat:${chatId}`;
+        
         // Forward to agent gateway
         const payload = config.agentId ? {
-          // Max uses /hooks/agent format
+          // Max uses /hooks/agent format with persistent session
           message: wakeText,
           name: 'Teams',
           agentId: config.agentId,
-          sessionKey: 'hook:teams:luca',
+          sessionKey: persistentSessionKey,
           deliver: true
         } : {
           // Other agents use /hooks/wake format
