@@ -23,6 +23,7 @@ const subscriptionConfigs = JSON.parse(
 const AGENTS = {
   max: {
     name: 'Max',
+    displayName: 'Max Ferretti', // Actual Teams display name
     clientId: '79b3f60a-ddfe-4029-8af4-1c95a37c6aa7',
     tenantId: '982780f8-0424-4e57-9cc0-bee3d6acc797',
     tokenFile: '/home/lucalicata/clawd/max-microsoft-tokens.json',
@@ -32,6 +33,7 @@ const AGENTS = {
   },
   sophia: {
     name: 'Sophia',
+    displayName: 'Sophia', // Actual Teams display name
     clientId: '50d301c0-ad4f-458b-95ec-f3c966f60f6c',
     tenantId: 'f2b38637-cb43-45b5-a5e8-e7a09fe436bb',
     tokenFile: '/home/lucalicata/clawd/sophia-microsoft-tokens.json',
@@ -42,6 +44,19 @@ const AGENTS = {
   // Kim now runs on her own laptop server (192.168.1.145:3007)
   // https://kim.acuity.expert
 };
+
+// State file for tracking subscription times and seen messages
+const STATE_FILE = path.join(__dirname, 'middleware-state.json');
+function loadState() {
+  if (fs.existsSync(STATE_FILE)) {
+    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+  }
+  return { agents: {} };
+}
+function saveState(state) {
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+}
+let middlewareState = loadState();
 
 // Initialize subscription managers for each agent
 const subscriptionManagers = {};
@@ -148,11 +163,44 @@ app.post('/webhook/teams/:agent', async (req, res) => {
         );
         const message = await msgResp.json();
         
-        // Skip own messages
-        if (message.from?.user?.displayName === config.name) continue;
+        // FILTER 1: Skip own messages (check actual Teams display name)
+        const fromDisplayName = message.from?.user?.displayName;
+        if (fromDisplayName === config.displayName) {
+          console.log(`[${agent}] Skipping own message from ${fromDisplayName}`);
+          continue;
+        }
+        
+        // FILTER 2: Skip messages older than middleware start time
+        // This prevents processing backfill messages from subscription creation
+        if (!middlewareState.agents[agent]) {
+          middlewareState.agents[agent] = {
+            startTime: new Date().toISOString(),
+            seenMessageIds: []
+          };
+          saveState(middlewareState);
+        }
+        const messageTime = new Date(message.createdDateTime);
+        const startTime = new Date(middlewareState.agents[agent].startTime);
+        if (messageTime < startTime) {
+          console.log(`[${agent}] Skipping old message from ${messageTime.toISOString()} (before start time ${startTime.toISOString()})`);
+          continue;
+        }
+        
+        // FILTER 3: Deduplicate - skip if already seen
+        if (middlewareState.agents[agent].seenMessageIds.includes(messageId)) {
+          console.log(`[${agent}] Skipping duplicate message ${messageId}`);
+          continue;
+        }
+        // Add to seen list (keep last 1000 to prevent unbounded growth)
+        middlewareState.agents[agent].seenMessageIds.push(messageId);
+        if (middlewareState.agents[agent].seenMessageIds.length > 1000) {
+          middlewareState.agents[agent].seenMessageIds = 
+            middlewareState.agents[agent].seenMessageIds.slice(-1000);
+        }
+        saveState(middlewareState);
         
         const content = message.body?.content?.replace(/<[^>]*>/g, '').trim() || '';
-        const from = message.from?.user?.displayName || 'Unknown';
+        const from = fromDisplayName || 'Unknown';
         
         console.log(`[${agent}] Teams message from ${from}: ${content.substring(0, 50)}...`);
         
@@ -622,102 +670,7 @@ app.listen(PORT, () => {
   console.log(`   Auto-renewal: Every 5 minutes for all subscriptions`);
 });
 
-// ==================== TEAMS POLLING ====================
-
-// Track seen message IDs (Microsoft Graph doesn't support filtering chat messages by date)
-const seenMessageIds = new Set();
-
-async function pollTeamsMessages() {
-  for (const agent of Object.keys(AGENTS)) {
-    try {
-      const config = AGENTS[agent];
-      const token = await getAccessToken(agent);
-      
-      // Get all chats
-      const chatsResp = await fetch(
-        'https://graph.microsoft.com/v1.0/me/chats',
-        { headers: { 'Authorization': `Bearer ${token}` } }
-      );
-      const chatsData = await chatsResp.json();
-      
-      if (chatsData.error) {
-        console.error(`[${agent}] Error fetching chats:`, chatsData.error.message);
-        continue;
-      }
-      
-      for (const chat of chatsData.value || []) {
-        const chatId = chat.id;
-        
-        // Get recent messages (top 5) - no filter supported by Microsoft
-        const messagesResp = await fetch(
-          `https://graph.microsoft.com/v1.0/me/chats/${chatId}/messages?$top=5`,
-          { headers: { 'Authorization': `Bearer ${token}` } }
-        );
-        const messagesData = await messagesResp.json();
-        
-        if (messagesData.error) continue;
-        
-        for (const message of messagesData.value || []) {
-          // Skip if already processed
-          if (seenMessageIds.has(message.id)) continue;
-          
-          // Skip own messages
-          if (message.from?.user?.displayName?.includes(config.name)) continue;
-          
-          const content = message.body?.content?.replace(/<[^>]*>/g, '').trim() || '';
-          if (!content) continue;
-          
-          const from = message.from?.user?.displayName || 'Unknown';
-          console.log(`[${agent}] Teams message from ${from}: ${content.substring(0, 50)}...`);
-          
-          // Mark as seen
-          seenMessageIds.add(message.id);
-          
-          // Create persistent session key
-          const persistentSessionKey = `hook:teams:${chatId}`;
-          
-          // Format message for agent
-          const replyScript = agent === 'sophia' 
-            ? 'node sophia-teams-reply.js' 
-            : agent === 'kim'
-            ? 'node kim-teams-reply.js'
-            : 'node ~/clawd/max-teams-reply.js';
-          
-          const wakeText = `💬 Teams message from ${from}: "${content}"\n\nChat ID: ${chatId}\n\nPlease respond using:\n${replyScript} "${chatId}" "<your reply in HTML format>"`;
-          
-          // Forward to agent gateway
-          const payload = config.agentId ? {
-            message: wakeText,
-            name: 'Teams',
-            agentId: config.agentId,
-            sessionKey: persistentSessionKey,
-            deliver: true
-          } : {
-            text: wakeText
-          };
-          
-          console.log(`[${agent}] Forwarding to ${config.gatewayUrl}...`);
-          const fwdResp = await fetch(config.gatewayUrl, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${config.gatewayToken}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-          });
-          const result = await fwdResp.text();
-          console.log(`[${agent}] Gateway response: ${result.substring(0, 100)}`);
-        }
-      }
-    } catch (error) {
-      console.error(`[${agent}] Teams polling error:`, error.message);
-    }
-  }
-}
-
-// Poll Teams messages every 30 seconds
-setInterval(pollTeamsMessages, 30 * 1000);
-
-// Run immediately on startup after 5 seconds
-setTimeout(pollTeamsMessages, 5000);
+// ==================== WEBHOOKS ONLY ====================
+// All Teams messages are received via webhooks at /webhook/teams/:agent
+// No polling needed - Microsoft Graph sends real-time notifications
 
