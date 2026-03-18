@@ -199,10 +199,34 @@ app.post('/webhook/teams/:agent', async (req, res) => {
         }
         saveState(middlewareState);
         
+        // FILTER 4: Group chat check - fetch chat details
+        const chatResp = await fetch(
+          `https://graph.microsoft.com/v1.0/me/chats/${chatId}`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        const chat = await chatResp.json();
+        const isGroupChat = chat.chatType === 'group';
+        
+        // FILTER 5: If group chat, check if agent is @mentioned
+        if (isGroupChat) {
+          const mentions = message.mentions || [];
+          const agentMentioned = mentions.some(m => 
+            m.mentioned?.user?.displayName === config.displayName
+          );
+          
+          if (!agentMentioned) {
+            console.log(`[${agent}] Skipping group chat message (not @mentioned). Chat: ${chat.topic || 'Unnamed'}`);
+            continue;
+          }
+          
+          console.log(`[${agent}] Group chat message where I'm @mentioned. Chat: ${chat.topic || 'Unnamed'}`);
+        }
+        
         const content = message.body?.content?.replace(/<[^>]*>/g, '').trim() || '';
         const from = fromDisplayName || 'Unknown';
+        const chatType = isGroupChat ? 'GROUP' : '1:1';
         
-        console.log(`[${agent}] Teams message from ${from}: ${content.substring(0, 50)}...`);
+        console.log(`[${agent}] [${chatType}] Teams message from ${from}: ${content.substring(0, 50)}...`);
         
         // Format message text with agent-specific reply command
         const replyScript = agent === 'sophia' 
