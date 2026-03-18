@@ -1,6 +1,22 @@
-node_modules/
+# Environment variables (contains secrets)
 .env
+
+# Token files (sensitive credentials)
+*-tokens.json
+*.age
+
+# State files (runtime generated)
+middleware-state.json
+last-teams-check.json
+
+# Logs
 *.log
-*.json.backup
-*.tokens.json
+server.log
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# OS files
 .DS_Store
+Thumbs.db

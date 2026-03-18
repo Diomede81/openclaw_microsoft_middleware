@@ -8,44 +8,65 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config(); // Load .env file
 const SubscriptionManager = require('./subscription-manager');
 const { handleCalendarNotification } = require('./webhooks/calendar-handler');
 
 const app = express();
-const PORT = 3007;
+const PORT = process.env.PORT || 3007;
 
 // Load subscription configurations
 const subscriptionConfigs = JSON.parse(
   fs.readFileSync(path.join(__dirname, 'config', 'subscriptions.json'), 'utf8')
 );
 
-// Agent configurations
-const AGENTS = {
-  max: {
-    name: 'Max',
-    displayName: 'Max Ferretti', // Actual Teams display name
-    userId: null, // Will be fetched from /me at startup
-    clientId: '79b3f60a-ddfe-4029-8af4-1c95a37c6aa7',
-    tenantId: '982780f8-0424-4e57-9cc0-bee3d6acc797',
-    tokenFile: '/home/lucalicata/clawd/max-microsoft-tokens.json',
-    gatewayUrl: 'http://localhost:18789/hooks/agent',
-    gatewayToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJlNmQ0NzMxNjk0Y2U0MmFmYjkwZWJlNzMzYmU3Nzc1ZSIsImlhdCI6MTc2OTY4NzMxNSwiZXhwIjoyMDg1MDQ3MzE1fQ.Yzz_QkIBbZfdTOEa_qvI_0gCUPfKLFPjYXWjAe_VYVk',
-    agentId: 'max'
-  },
-  sophia: {
-    name: 'Sophia',
-    displayName: 'Sophia', // Actual Teams display name
-    userId: null, // Will be fetched from /me at startup
-    clientId: '50d301c0-ad4f-458b-95ec-f3c966f60f6c',
-    tenantId: 'f2b38637-cb43-45b5-a5e8-e7a09fe436bb',
-    tokenFile: '/home/lucalicata/clawd/sophia-microsoft-tokens.json',
-    gatewayUrl: 'http://localhost:19789/hooks/agent',
-    gatewayToken: 'sophia-hooks-token-2026',
-    agentId: 'sophia'
-  },
-  // Kim now runs on her own laptop server (192.168.1.145:3007)
-  // https://kim.acuity.expert
-};
+// Build agent configurations from environment variables
+const AGENTS = {};
+
+// Helper to load agent config from env
+function loadAgentConfig(agentName) {
+  const prefix = agentName.toUpperCase();
+  const clientId = process.env[`${prefix}_CLIENT_ID`];
+  const tenantId = process.env[`${prefix}_TENANT_ID`];
+  const tokenFile = process.env[`${prefix}_TOKEN_FILE`];
+  const gatewayUrl = process.env[`${prefix}_GATEWAY_URL`];
+  const gatewayToken = process.env[`${prefix}_GATEWAY_TOKEN`];
+  const displayName = process.env[`${prefix}_DISPLAY_NAME`];
+  const agentId = process.env[`${prefix}_AGENT_ID`] || agentName;
+  
+  // Only create agent config if required fields exist
+  if (clientId && tenantId && tokenFile && gatewayUrl && gatewayToken && displayName) {
+    return {
+      name: agentName.charAt(0).toUpperCase() + agentName.slice(1),
+      displayName,
+      userId: null, // Will be fetched from /me at startup
+      clientId,
+      tenantId,
+      tokenFile,
+      gatewayUrl,
+      gatewayToken,
+      agentId
+    };
+  }
+  return null;
+}
+
+// Load all agents from env (MAX_, SOPHIA_, KIM_, etc.)
+const agentNames = new Set();
+for (const key in process.env) {
+  const match = key.match(/^([A-Z]+)_CLIENT_ID$/);
+  if (match) {
+    agentNames.add(match[1].toLowerCase());
+  }
+}
+
+for (const agentName of agentNames) {
+  const config = loadAgentConfig(agentName);
+  if (config) {
+    AGENTS[agentName] = config;
+    console.log(`[${agentName}] Loaded from environment`);
+  }
+}
 
 // State file for tracking subscription times and seen messages
 const STATE_FILE = path.join(__dirname, 'middleware-state.json');
