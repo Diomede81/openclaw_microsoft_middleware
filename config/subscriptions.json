@@ -13,6 +13,13 @@
       "notificationUrl": "https://microsoft.acuity.expert/webhook/email/max",
       "clientState": "max-email",
       "maxExpirationMinutes": 4320
+    },
+    {
+      "resource": "/me/events",
+      "changeType": "created,updated,deleted",
+      "notificationUrl": "https://microsoft.acuity.expert/webhook/calendar/max",
+      "clientState": "max-calendar",
+      "maxExpirationMinutes": 4320
     }
   ],
   "sophia": [
@@ -28,6 +35,13 @@
       "changeType": "created",
       "notificationUrl": "https://microsoft.acuity.expert/webhook/email/sophia",
       "clientState": "sophia-email",
+      "maxExpirationMinutes": 4320
+    },
+    {
+      "resource": "/me/events",
+      "changeType": "created,updated,deleted",
+      "notificationUrl": "https://microsoft.acuity.expert/webhook/calendar/sophia",
+      "clientState": "sophia-calendar",
       "maxExpirationMinutes": 4320
     }
   ]

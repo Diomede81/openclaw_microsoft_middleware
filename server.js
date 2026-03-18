@@ -9,6 +9,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const SubscriptionManager = require('./subscription-manager');
+const { handleCalendarNotification } = require('./webhooks/calendar-handler');
 
 const app = express();
 const PORT = 3007;
@@ -413,6 +414,40 @@ app.post('/api/calendar/create', async (req, res) => {
     }
   } catch (error) {
     console.error(`[${agent}] Calendar create error:`, error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== CALENDAR WEBHOOKS ====================
+
+// Calendar webhook notifications
+app.post('/webhook/calendar/:agent', async (req, res) => {
+  const { agent } = req.params;
+  const config = AGENTS[agent];
+  
+  if (!config) {
+    return res.status(404).json({ error: 'Unknown agent' });
+  }
+  
+  // Handle Microsoft validation
+  const validationToken = req.query.validationToken;
+  if (validationToken) {
+    console.log(`[${agent}] Calendar webhook validation`);
+    return res.status(200).type('text/plain').send(validationToken);
+  }
+  
+  // Handle notifications
+  try {
+    const notifications = req.body.value || [];
+    console.log(`[${agent}] Received ${notifications.length} calendar notifications`);
+    
+    for (const notification of notifications) {
+      await handleCalendarNotification(agent, notification, getAccessToken, config);
+    }
+    
+    res.status(200).send('OK');
+  } catch (error) {
+    console.error(`[${agent}] Calendar webhook error:`, error.message);
     res.status(500).json({ error: error.message });
   }
 });
