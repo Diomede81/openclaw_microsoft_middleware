@@ -365,26 +365,16 @@ app.post('/webhook/teams/:agent', async (req, res) => {
         // This maintains conversation context across messages, like WhatsApp sessions
         const persistentSessionKey = `agent:${config.agentId}:teams:${chatType}:${chatId}`;
         
-        // Forward to agent gateway with delivery context for proper session management
-        const payload = config.agentId ? {
-          // Max uses /hooks/agent format with persistent session
+        // Forward to agent gateway using /hooks/agent endpoint
+        // sessionKey will create persistent session per chat (format: agent:max:teams:direct:chatId)
+        const payload = {
           message: wakeText,
-          name: 'Teams',
           agentId: config.agentId,
           sessionKey: persistentSessionKey,
-          deliver: true,
-          // Add delivery context for session routing
-          deliveryContext: {
-            channel: 'teams',
-            to: chatId,
-            chatType: chatType
-          }
-        } : {
-          // Other agents use /hooks/wake format
-          text: wakeText
+          deliver: true
         };
         
-        console.log(`[${agent}] Forwarding to ${config.gatewayUrl}...`);
+        console.log(`[${agent}] Forwarding to ${config.gatewayUrl} with sessionKey: ${persistentSessionKey}`);
         const fwdResp = await fetch(config.gatewayUrl, {
           method: 'POST',
           headers: {
