@@ -325,7 +325,8 @@ app.post('/webhook/teams/:agent', async (req, res) => {
         
         const content = message.body?.content?.replace(/<[^>]*>/g, '').trim() || '';
         const from = fromDisplayName || 'Unknown';
-        const chatType = isGroupChat ? 'GROUP' : '1:1';
+        const chatTypeLabel = isGroupChat ? 'GROUP' : '1:1';
+        const chatType = isGroupChat ? 'group' : 'direct'; // For session key
         
         // Check for attachments
         const attachments = message.attachments || [];
@@ -348,7 +349,7 @@ app.post('/webhook/teams/:agent', async (req, res) => {
           }
         }
         
-        console.log(`[${agent}] [${chatType}] Teams message from ${from}: ${content.substring(0, 50)}...`);
+        console.log(`[${agent}] [${chatTypeLabel}] Teams message from ${from}: ${content.substring(0, 50)}...`);
         
         // Format message text with agent-specific reply command
         const replyScript = agent === 'sophia' 
@@ -359,18 +360,25 @@ app.post('/webhook/teams/:agent', async (req, res) => {
         
         const wakeText = `💬 Teams message from ${from}: "${content}"${attachmentInfo}\n\nChat ID: ${chatId}\n\nPlease respond to this Teams message using:\n${replyScript} "${chatId}" "<your reply in HTML format>"`;
         
-        // Create persistent session key based on chatId
-        // This maintains conversation context across messages
-        const persistentSessionKey = `hook:teams:${chatId}`;
+        // Create persistent session key matching OpenClaw's format
+        // Format: agent:{agentId}:{channel}:{chatType}:{chatId}
+        // This maintains conversation context across messages, like WhatsApp sessions
+        const persistentSessionKey = `agent:${config.agentId}:teams:${chatType}:${chatId}`;
         
-        // Forward to agent gateway
+        // Forward to agent gateway with delivery context for proper session management
         const payload = config.agentId ? {
           // Max uses /hooks/agent format with persistent session
           message: wakeText,
           name: 'Teams',
           agentId: config.agentId,
           sessionKey: persistentSessionKey,
-          deliver: true
+          deliver: true,
+          // Add delivery context for session routing
+          deliveryContext: {
+            channel: 'teams',
+            to: chatId,
+            chatType: chatType
+          }
         } : {
           // Other agents use /hooks/wake format
           text: wakeText
