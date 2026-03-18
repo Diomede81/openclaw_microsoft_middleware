@@ -120,19 +120,28 @@ Checks on every API call:
 
 #### Mechanism 2: Proactive Refresh Timer (Scheduled)
 
-Independent timer checks all tokens every 30 minutes:
+Independent timer checks all tokens every **15 minutes**:
 - Reads token file directly
 - Calculates minutes until expiry
 - Logs token status for each agent
-- Refreshes if expiring within 10 minutes
+- Refreshes if expiring within **20 minutes**
+
+**Why 15 min interval + 20 min threshold?**
+- Ensures no token expires between checks
+- Worst case: Token at 20 min → Next check at 15 min → Still 5 min remaining
+- Safety margin prevents any gaps
 
 **Why Both?**
 - On-demand: Handles high-traffic scenarios
 - Proactive: Ensures tokens stay fresh even during idle periods
 - Redundancy: If one fails, the other catches it
 
-2. **Proactive timer checks (every 30 minutes):**
+2. **Proactive timer checks (every 15 minutes):**
    ```javascript
+   // Constants
+   CHECK_INTERVAL = 15 minutes
+   REFRESH_THRESHOLD = 20 minutes // Interval + 5 min buffer
+   
    // Read token file
    tokens = readTokenFile()
    expiresAt = tokens.obtained_at + (tokens.expires_in * 1000)
@@ -141,9 +150,11 @@ Independent timer checks all tokens every 30 minutes:
    // Log status
    console.log(`Token valid for ${minutesRemaining} minutes`)
    
-   // Refresh if expiring soon
-   if (minutesRemaining < 10) {
+   // Refresh if expiring before next check + buffer
+   if (minutesRemaining < REFRESH_THRESHOLD) {
+     console.log(`Proactive refresh (${minutesRemaining} min remaining, threshold: 20 min)`)
      refreshToken()
+     console.log(`✓ Token refreshed (now valid for 60 minutes)`)
    }
    ```
 
@@ -327,17 +338,17 @@ try {
 
 ### Proactive Monitoring (Automatic)
 
-The server logs token status every 30 minutes:
+The server logs token status every **15 minutes**:
 
 ```bash
-[max] Token valid for 31 minutes
-[sophia] Token valid for 48 minutes
+[max] Token valid for 25 minutes
+[sophia] Token valid for 42 minutes
 ```
 
-If expiring soon (< 10 min):
+If expiring soon (< 20 min):
 ```bash
-[max] Proactive token refresh (8 min remaining)...
-[max] ✓ Token refreshed proactively
+[max] Proactive token refresh (18 min remaining, threshold: 20 min)...
+[max] ✓ Token refreshed proactively (now valid for 60 minutes)
 ```
 
 ### Manual Checks

@@ -804,11 +804,16 @@ async function initializeAgentUserIds() {
 
 /**
  * Proactive token refresh timer
- * Checks and refreshes tokens every 30 minutes
+ * Checks and refreshes tokens regularly to prevent expiration
  * Ensures tokens stay fresh even if no API calls are made
  */
 function startTokenRefreshTimer() {
-  const REFRESH_INTERVAL = 30 * 60 * 1000; // 30 minutes
+  // Check every 15 minutes (more frequent than 30 min to catch tokens)
+  const CHECK_INTERVAL = 15 * 60 * 1000; // 15 minutes
+  
+  // Refresh if expiring within (CHECK_INTERVAL + buffer)
+  // Buffer: 5 minutes for safety
+  const REFRESH_THRESHOLD = Math.floor(CHECK_INTERVAL / 60000) + 5; // 20 minutes
   
   async function checkAndRefreshTokens() {
     for (const [agentName, config] of Object.entries(AGENTS)) {
@@ -822,14 +827,21 @@ function startTokenRefreshTimer() {
         if (minutesUntilExpiry > 0) {
           console.log(`[${agentName}] Token valid for ${minutesUntilExpiry} minutes`);
         } else {
-          console.log(`[${agentName}] Token expired ${Math.abs(minutesUntilExpiry)} minutes ago`);
+          console.log(`[${agentName}] ⚠️ Token expired ${Math.abs(minutesUntilExpiry)} minutes ago!`);
         }
         
-        // Proactively refresh if expiring within 10 minutes
-        if (minutesUntilExpiry < 10) {
-          console.log(`[${agentName}] Proactive token refresh (${minutesUntilExpiry} min remaining)...`);
+        // Proactively refresh if expiring within threshold
+        // This ensures token won't expire before next check
+        if (minutesUntilExpiry < REFRESH_THRESHOLD) {
+          console.log(`[${agentName}] Proactive token refresh (${minutesUntilExpiry} min remaining, threshold: ${REFRESH_THRESHOLD} min)...`);
           await getAccessToken(agentName); // This will trigger refresh
-          console.log(`[${agentName}] ✓ Token refreshed proactively`);
+          
+          // Re-read token to get new expiry
+          const newTokens = JSON.parse(fs.readFileSync(config.tokenFile, 'utf8'));
+          const newExpiresAt = newTokens.obtained_at + (newTokens.expires_in * 1000);
+          const newMinutes = Math.floor((newExpiresAt - Date.now()) / 60000);
+          
+          console.log(`[${agentName}] ✓ Token refreshed proactively (now valid for ${newMinutes} minutes)`);
         }
       } catch (error) {
         console.error(`[${agentName}] Token refresh check error:`, error.message);
@@ -840,10 +852,10 @@ function startTokenRefreshTimer() {
   // Run immediately on startup
   setTimeout(checkAndRefreshTokens, 10000); // 10 seconds after startup
   
-  // Then every 30 minutes
-  setInterval(checkAndRefreshTokens, REFRESH_INTERVAL);
+  // Then every 15 minutes
+  setInterval(checkAndRefreshTokens, CHECK_INTERVAL);
   
-  console.log('Token refresh timer started (checks every 30 minutes)');
+  console.log(`Token refresh timer started (checks every ${CHECK_INTERVAL / 60000} minutes, refreshes if < ${REFRESH_THRESHOLD} min remaining)`);
 }
 
 // Initialize user IDs then start services
@@ -865,7 +877,7 @@ app.listen(PORT, () => {
   console.log(`   Health: http://localhost:${PORT}/health`);
   console.log(`   Subscription managers: ${Object.keys(subscriptionManagers).join(', ')}`);
   console.log(`   Subscription auto-renewal: Every 5 minutes`);
-  console.log(`   Token refresh checks: Every 30 minutes (proactive)`);
+  console.log(`   Token refresh checks: Every 15 minutes (proactive)`);
 });
 
 // ==================== WEBHOOKS ONLY ====================
