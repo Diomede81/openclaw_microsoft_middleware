@@ -27,6 +27,7 @@ const AGENTS = {};
 function loadAgentConfig(agentName) {
   const prefix = agentName.toUpperCase();
   const clientId = process.env[`${prefix}_CLIENT_ID`];
+  const clientSecret = process.env[`${prefix}_CLIENT_SECRET`]; // Optional
   const tenantId = process.env[`${prefix}_TENANT_ID`];
   const tokenFile = process.env[`${prefix}_TOKEN_FILE`];
   const gatewayUrl = process.env[`${prefix}_GATEWAY_URL`];
@@ -36,7 +37,7 @@ function loadAgentConfig(agentName) {
   
   // Only create agent config if required fields exist
   if (clientId && tenantId && tokenFile && gatewayUrl && gatewayToken && displayName) {
-    return {
+    const config = {
       name: agentName.charAt(0).toUpperCase() + agentName.slice(1),
       displayName,
       userId: null, // Will be fetched from /me at startup
@@ -47,6 +48,13 @@ function loadAgentConfig(agentName) {
       gatewayToken,
       agentId
     };
+    
+    // Add client secret if provided (for confidential client apps)
+    if (clientSecret) {
+      config.clientSecret = clientSecret;
+    }
+    
+    return config;
   }
   return null;
 }
@@ -109,41 +117,94 @@ app.use((req, res, next) => {
 
 // ==================== TOKEN MANAGEMENT ====================
 
+/**
+ * Get valid access token for an agent
+ * Auto-refreshes if expired or expiring soon
+ */
 async function getAccessToken(agent) {
   const config = AGENTS[agent];
   if (!config) throw new Error(`Unknown agent: ${agent}`);
   
-  const tokens = JSON.parse(fs.readFileSync(config.tokenFile, 'utf8'));
-  const expiresAt = tokens.obtained_at + (tokens.expires_in * 1000);
+  // Read current tokens
+  let tokens;
+  try {
+    tokens = JSON.parse(fs.readFileSync(config.tokenFile, 'utf8'));
+  } catch (error) {
+    throw new Error(`Failed to read token file for ${agent}: ${error.message}`);
+  }
   
-  // Refresh if expired or expiring soon (5 min buffer)
-  if (Date.now() > expiresAt - 300000) {
-    console.log(`[${agent}] Refreshing access token...`);
+  // Validate token structure
+  if (!tokens.refresh_token) {
+    throw new Error(`No refresh_token found for ${agent}. Re-authenticate required.`);
+  }
+  
+  // Check if token is still valid (5 min buffer)
+  const expiresAt = tokens.obtained_at + (tokens.expires_in * 1000);
+  const needsRefresh = Date.now() > expiresAt - 300000;
+  
+  if (!needsRefresh) {
+    return tokens.access_token;
+  }
+  
+  // Token needs refresh
+  console.log(`[${agent}] Access token expired or expiring soon, refreshing...`);
+  
+  const tokenParams = {
+    client_id: config.clientId,
+    refresh_token: tokens.refresh_token,
+    grant_type: 'refresh_token',
+    scope: 'https://graph.microsoft.com/.default'
+  };
+  
+  // Add client secret if available (required for confidential clients)
+  if (config.clientSecret) {
+    tokenParams.client_secret = config.clientSecret;
+  }
+  
+  try {
     const response = await fetch(
       `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: config.clientId,
-          refresh_token: tokens.refresh_token,
-          grant_type: 'refresh_token',
-          scope: 'https://graph.microsoft.com/.default'
-        })
+        body: new URLSearchParams(tokenParams)
       }
     );
     
     const newTokens = await response.json();
+    
     if (newTokens.error) {
+      console.error(`[${agent}] Token refresh failed:`, newTokens.error_description);
       throw new Error(`Token refresh failed: ${newTokens.error_description}`);
     }
     
-    newTokens.obtained_at = Date.now();
-    fs.writeFileSync(config.tokenFile, JSON.stringify(newTokens, null, 2));
-    return newTokens.access_token;
+    // Validate new tokens
+    if (!newTokens.access_token || !newTokens.refresh_token) {
+      throw new Error('Token response missing required fields');
+    }
+    
+    // Preserve original fields and add new tokens
+    const updatedTokens = {
+      ...tokens,
+      ...newTokens,
+      obtained_at: Date.now()
+    };
+    
+    // Atomic write: write to temp file, then rename
+    const tempFile = `${config.tokenFile}.tmp`;
+    fs.writeFileSync(tempFile, JSON.stringify(updatedTokens, null, 2), { mode: 0o600 });
+    fs.renameSync(tempFile, config.tokenFile);
+    
+    console.log(`[${agent}] ✓ Token refreshed successfully (expires in ${updatedTokens.expires_in}s)`);
+    
+    return updatedTokens.access_token;
+    
+  } catch (error) {
+    console.error(`[${agent}] Token refresh error:`, error.message);
+    
+    // If token refresh fails, throw error (don't use expired token)
+    throw new Error(`Cannot refresh token for ${agent}: ${error.message}`);
   }
-  
-  return tokens.access_token;
 }
 
 // ==================== TEAMS ====================
