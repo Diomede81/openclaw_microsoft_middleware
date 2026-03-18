@@ -24,6 +24,7 @@ const AGENTS = {
   max: {
     name: 'Max',
     displayName: 'Max Ferretti', // Actual Teams display name
+    userId: '15f6df21-5683-40eb-b385-30154a4d6c02', // Microsoft Graph user ID
     clientId: '79b3f60a-ddfe-4029-8af4-1c95a37c6aa7',
     tenantId: '982780f8-0424-4e57-9cc0-bee3d6acc797',
     tokenFile: '/home/lucalicata/clawd/max-microsoft-tokens.json',
@@ -210,8 +211,9 @@ app.post('/webhook/teams/:agent', async (req, res) => {
         // FILTER 5: If group chat, check if agent is @mentioned
         if (isGroupChat) {
           const mentions = message.mentions || [];
+          // Check by user ID (more reliable than displayName which can be "Max" or "Max Ferretti")
           const agentMentioned = mentions.some(m => 
-            m.mentioned?.user?.displayName === config.displayName
+            m.mentioned?.user?.id === config.userId
           );
           
           if (!agentMentioned) {
@@ -219,7 +221,7 @@ app.post('/webhook/teams/:agent', async (req, res) => {
             continue;
           }
           
-          console.log(`[${agent}] Group chat message where I'm @mentioned. Chat: ${chat.topic || 'Unnamed'}`);
+          console.log(`[${agent}] 🎯 Group chat message where I'm @mentioned! Chat: ${chat.topic || 'Unnamed'}`);
         }
         
         const content = message.body?.content?.replace(/<[^>]*>/g, '').trim() || '';
