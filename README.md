@@ -96,7 +96,8 @@ See example in project README.
 
 ### Teams
 - `POST /webhook/teams/:agent` - Teams webhook (Microsoft notifications)
-- `POST /api/teams/send` - Send Teams message
+- `POST /api/teams/send` - Send Teams message (with optional attachments)
+- `POST /api/teams/upload` - Upload file to OneDrive, get sharing link
 
 ### Email
 - `POST /webhook/email/:agent` - Email webhook (Microsoft notifications)
