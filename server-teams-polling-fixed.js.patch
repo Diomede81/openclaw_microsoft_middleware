@@ -1,0 +1,90 @@
+Replace the Teams polling section with:
+
+// Track seen message IDs to avoid duplicates
+const seenMessages = new Set();
+
+async function pollTeamsMessages() {
+  for (const agent of Object.keys(AGENTS)) {
+    try {
+      const config = AGENTS[agent];
+      const token = await getAccessToken(agent);
+      
+      // Get all chats
+      const chatsResp = await fetch(
+        'https://graph.microsoft.com/v1.0/me/chats',
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+      const chatsData = await chatsResp.json();
+      
+      if (chatsData.error) {
+        console.error(`[${agent}] Error fetching chats:`, chatsData.error.message);
+        continue;
+      }
+      
+      for (const chat of chatsData.value || []) {
+        const chatId = chat.id;
+        
+        // Get most recent messages (top 5, no filter - Microsoft doesn't support filtering)
+        const messagesResp = await fetch(
+          `https://graph.microsoft.com/v1.0/me/chats/${chatId}/messages?$top=5`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        const messagesData = await messagesResp.json();
+        
+        if (messagesData.error) continue;
+        
+        for (const message of messagesData.value || []) {
+          // Skip if already seen
+          if (seenMessages.has(message.id)) continue;
+          
+          // Skip own messages
+          if (message.from?.user?.displayName?.includes(config.name)) continue;
+          
+          const content = message.body?.content?.replace(/<[^>]*>/g, '').trim() || '';
+          if (!content) continue;
+          
+          const from = message.from?.user?.displayName || 'Unknown';
+          console.log(`[${agent}] Teams message from ${from}: ${content.substring(0, 50)}...`);
+          
+          // Mark as seen
+          seenMessages.add(message.id);
+          
+          // Create persistent session key
+          const persistentSessionKey = `teams:chat:${chatId}`;
+          
+          const replyScript = agent === 'sophia' 
+            ? 'node sophia-teams-reply.js' 
+            : agent === 'kim'
+            ? 'node kim-teams-reply.js'
+            : 'node ~/clawd/max-teams-reply.js';
+          
+          const wakeText = `💬 Teams message from ${from}: "${content}"\n\nChat ID: ${chatId}\n\nPlease respond using:\n${replyScript} "${chatId}" "<your reply in HTML format>"`;
+          
+          const payload = config.agentId ? {
+            message: wakeText,
+            name: 'Teams',
+            agentId: config.agentId,
+            sessionKey: persistentSessionKey,
+            deliver: true
+          } : {
+            text: wakeText
+          };
+          
+          console.log(`[${agent}] Forwarding to ${config.gatewayUrl}...`);
+          const fwdResp = await fetch(config.gatewayUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${config.gatewayToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+          const result = await fwdResp.text();
+          console.log(`[${agent}] Gateway response: ${result.substring(0, 100)}`);
+        }
+      }
+    } catch (error) {
+      console.error(`[${agent}] Teams polling error:`, error.message);
+    }
+  }
+}

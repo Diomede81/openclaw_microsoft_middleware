@@ -1,0 +1,34 @@
+{
+  "max": [
+    {
+      "resource": "/me/chats/getAllMessages",
+      "changeType": "created",
+      "notificationUrl": "https://microsoft.acuity.expert/webhook/teams/max",
+      "clientState": "max-teams",
+      "maxExpirationMinutes": 60
+    },
+    {
+      "resource": "/me/messages",
+      "changeType": "created",
+      "notificationUrl": "https://microsoft.acuity.expert/webhook/email/max",
+      "clientState": "max-email",
+      "maxExpirationMinutes": 4320
+    }
+  ],
+  "sophia": [
+    {
+      "resource": "/me/chats/getAllMessages",
+      "changeType": "created",
+      "notificationUrl": "https://microsoft.acuity.expert/webhook/teams/sophia",
+      "clientState": "sophia-teams",
+      "maxExpirationMinutes": 60
+    },
+    {
+      "resource": "/me/messages",
+      "changeType": "created",
+      "notificationUrl": "https://microsoft.acuity.expert/webhook/email/sophia",
+      "clientState": "sophia-email",
+      "maxExpirationMinutes": 4320
+    }
+  ]
+}

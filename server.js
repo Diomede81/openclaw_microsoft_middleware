@@ -8,9 +8,15 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const SubscriptionManager = require('./subscription-manager');
 
 const app = express();
 const PORT = 3007;
+
+// Load subscription configurations
+const subscriptionConfigs = JSON.parse(
+  fs.readFileSync(path.join(__dirname, 'config', 'subscriptions.json'), 'utf8')
+);
 
 // Agent configurations
 const AGENTS = {
@@ -35,6 +41,22 @@ const AGENTS = {
   // Kim now runs on her own laptop server (192.168.1.145:3007)
   // https://kim.acuity.expert
 };
+
+// Initialize subscription managers for each agent
+const subscriptionManagers = {};
+
+for (const [agentName, agentConfig] of Object.entries(AGENTS)) {
+  if (subscriptionConfigs[agentName]) {
+    subscriptionManagers[agentName] = new SubscriptionManager({
+      agentName,
+      clientId: agentConfig.clientId,
+      tenantId: agentConfig.tenantId,
+      tokenFile: agentConfig.tokenFile,
+      webhookBaseUrl: 'https://microsoft.acuity.expert',
+      subscriptions: subscriptionConfigs[agentName]
+    });
+  }
+}
 
 // Middleware
 app.use(express.json());
@@ -144,7 +166,7 @@ app.post('/webhook/teams/:agent', async (req, res) => {
         
         // Create persistent session key based on chatId
         // This maintains conversation context across messages
-        const persistentSessionKey = `teams:chat:${chatId}`;
+        const persistentSessionKey = `hook:teams:${chatId}`;
         
         // Forward to agent gateway
         const payload = config.agentId ? {
@@ -477,147 +499,56 @@ app.post('/webhook/email/:agent', async (req, res) => {
 
 // ==================== SUBSCRIPTIONS MANAGEMENT ====================
 
-// Create Teams subscription
-app.post('/api/subscription/teams/:agent', async (req, res) => {
-  const { agent } = req.params;
-  const config = AGENTS[agent];
-  
-  if (!config) {
-    return res.status(404).json({ error: 'Unknown agent' });
-  }
-  
-  try {
-    const token = await getAccessToken(agent);
-    const expirationDateTime = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    const webhookUrl = `https://microsoft.acuity.expert/webhook/teams/${agent}`;
-    
-    const response = await fetch(
-      'https://graph.microsoft.com/v1.0/subscriptions',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          changeType: 'created',
-          notificationUrl: webhookUrl,
-          resource: '/me/chats/getAllMessages',
-          expirationDateTime,
-          clientState: `${agent}-teams`
-        })
-      }
-    );
-    
-    const data = await response.json();
-    
-    if (data.error) {
-      throw new Error(data.error.message);
-    }
-    
-    console.log(`[${agent}] Teams subscription created: ${data.id}`);
-    res.json({ success: true, subscriptionId: data.id, expiresAt: data.expirationDateTime });
-  } catch (error) {
-    console.error(`[${agent}] Subscription error:`, error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Create Email subscription
-app.post('/api/subscription/email/:agent', async (req, res) => {
-  const { agent } = req.params;
-  const config = AGENTS[agent];
-  
-  if (!config) {
-    return res.status(404).json({ error: 'Unknown agent' });
-  }
-  
-  try {
-    const token = await getAccessToken(agent);
-    const expirationDateTime = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(); // 3 days max
-    const webhookUrl = `https://microsoft.acuity.expert/webhook/email/${agent}`;
-    
-    const response = await fetch(
-      'https://graph.microsoft.com/v1.0/subscriptions',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          changeType: 'created',
-          notificationUrl: webhookUrl,
-          resource: '/me/messages',
-          expirationDateTime,
-          clientState: `${agent}-email`
-        })
-      }
-    );
-    
-    const data = await response.json();
-    
-    if (data.error) {
-      throw new Error(data.error.message);
-    }
-    
-    console.log(`[${agent}] Email subscription created: ${data.id}`);
-    res.json({ success: true, subscriptionId: data.id, expiresAt: data.expirationDateTime });
-  } catch (error) {
-    console.error(`[${agent}] Email subscription error:`, error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // List active subscriptions
 app.get('/api/subscription/list/:agent', async (req, res) => {
   const { agent } = req.params;
+  const manager = subscriptionManagers[agent];
+  
+  if (!manager) {
+    return res.status(404).json({ error: 'Unknown agent' });
+  }
   
   try {
-    const token = await getAccessToken(agent);
-    const response = await fetch(
-      'https://graph.microsoft.com/v1.0/subscriptions',
-      { headers: { 'Authorization': `Bearer ${token}` } }
-    );
-    
-    const data = await response.json();
-    res.json(data.value || []);
+    const subscriptions = await manager.listSubscriptions();
+    res.json(subscriptions);
   } catch (error) {
     console.error(`[${agent}] List subscriptions error:`, error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Renew subscription
-app.post('/api/subscription/renew/:agent/:subscriptionId', async (req, res) => {
-  const { agent, subscriptionId } = req.params;
+// Manual refresh of all subscriptions for an agent
+app.post('/api/subscription/refresh/:agent', async (req, res) => {
+  const { agent } = req.params;
+  const manager = subscriptionManagers[agent];
+  
+  if (!manager) {
+    return res.status(404).json({ error: 'Unknown agent' });
+  }
   
   try {
-    const token = await getAccessToken(agent);
-    const expirationDateTime = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour for Teams
-    
-    const response = await fetch(
-      `https://graph.microsoft.com/v1.0/subscriptions/${subscriptionId}`,
-      {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ expirationDateTime })
-      }
-    );
-    
-    const data = await response.json();
-    
-    if (data.error) {
-      throw new Error(data.error.message);
-    }
-    
-    console.log(`[${agent}] Subscription renewed: ${subscriptionId}`);
-    res.json({ success: true, expiresAt: data.expirationDateTime });
+    await manager.refreshAllSubscriptions();
+    res.json({ success: true, message: 'All subscriptions refreshed' });
   } catch (error) {
-    console.error(`[${agent}] Renew subscription error:`, error.message);
+    console.error(`[${agent}] Refresh subscriptions error:`, error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete a subscription
+app.delete('/api/subscription/:agent/:subscriptionId', async (req, res) => {
+  const { agent, subscriptionId } = req.params;
+  const manager = subscriptionManagers[agent];
+  
+  if (!manager) {
+    return res.status(404).json({ error: 'Unknown agent' });
+  }
+  
+  try {
+    await manager.deleteSubscription(subscriptionId);
+    res.json({ success: true, message: 'Subscription deleted' });
+  } catch (error) {
+    console.error(`[${agent}] Delete subscription error:`, error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -639,104 +570,12 @@ app.get('/status/:agent', async (req, res) => {
   }
 });
 
-// ==================== AUTO-RENEWAL ====================
+// ==================== AUTO-RENEWAL (via SubscriptionManager) ====================
 
-// Store subscription IDs for auto-renewal
-const subscriptions = {
-  // Format: agent: { teams: subscriptionId, email: subscriptionId }
-};
-
-// Auto-renew Teams subscriptions every 45 minutes (before 60min expiry)
-async function autoRenewTeamsSubscriptions() {
-  console.log('[auto-renew] Checking Teams subscriptions...');
-  
-  for (const agent of Object.keys(AGENTS)) {
-    try {
-      const token = await getAccessToken(agent);
-      
-      // List current subscriptions
-      const listResp = await fetch('https://graph.microsoft.com/v1.0/subscriptions', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await listResp.json();
-      
-      // Find Teams subscription for this agent
-      const teamsSub = data.value?.find(s => 
-        s.resource === '/me/chats/getAllMessages' && 
-        s.clientState === `${agent}-teams`
-      );
-      
-      if (teamsSub) {
-        // Renew if expires within 20 minutes
-        const expiresAt = new Date(teamsSub.expirationDateTime);
-        const minutesUntilExpiry = (expiresAt - Date.now()) / 60000;
-        
-        if (minutesUntilExpiry < 20) {
-          console.log(`[${agent}] Teams subscription expires in ${minutesUntilExpiry.toFixed(1)}min, renewing...`);
-          
-          const newExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-          const renewResp = await fetch(
-            `https://graph.microsoft.com/v1.0/subscriptions/${teamsSub.id}`,
-            {
-              method: 'PATCH',
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({ expirationDateTime: newExpiry })
-            }
-          );
-          
-          if (renewResp.ok) {
-            console.log(`[${agent}] Teams subscription renewed: ${teamsSub.id}`);
-            subscriptions[agent] = { ...subscriptions[agent], teams: teamsSub.id };
-          } else {
-            console.error(`[${agent}] Failed to renew Teams subscription:`, await renewResp.text());
-          }
-        } else {
-          console.log(`[${agent}] Teams subscription OK (${minutesUntilExpiry.toFixed(1)}min remaining)`);
-        }
-      } else {
-        console.log(`[${agent}] No Teams subscription found, creating...`);
-        
-        // Create new subscription
-        const webhookUrl = `https://microsoft.acuity.expert/webhook/teams/${agent}`;
-        const expirationDateTime = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-        
-        const createResp = await fetch('https://graph.microsoft.com/v1.0/subscriptions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            changeType: 'created',
-            notificationUrl: webhookUrl,
-            resource: '/me/chats/getAllMessages',
-            expirationDateTime,
-            clientState: `${agent}-teams`
-          })
-        });
-        
-        if (createResp.ok) {
-          const newSub = await createResp.json();
-          console.log(`[${agent}] Teams subscription created: ${newSub.id}`);
-          subscriptions[agent] = { ...subscriptions[agent], teams: newSub.id };
-        } else {
-          console.error(`[${agent}] Failed to create Teams subscription:`, await createResp.text());
-        }
-      }
-    } catch (error) {
-      console.error(`[${agent}] Auto-renewal error:`, error.message);
-    }
-  }
+// Start auto-renewal for all agents
+for (const [agentName, manager] of Object.entries(subscriptionManagers)) {
+  manager.startAutoRenewal();
 }
-
-// Run auto-renewal every 45 minutes
-setInterval(autoRenewTeamsSubscriptions, 45 * 60 * 1000);
-
-// Run immediately on startup
-setTimeout(autoRenewTeamsSubscriptions, 5000);
 
 // ==================== START SERVER ====================
 
@@ -744,7 +583,8 @@ app.listen(PORT, () => {
   console.log(`✅ Microsoft 365 Integration Server running on port ${PORT}`);
   console.log(`   Agents: ${Object.keys(AGENTS).join(', ')}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
-  console.log(`   Auto-renewal: Teams subscriptions every 45 minutes`);
+  console.log(`   Subscription managers: ${Object.keys(subscriptionManagers).join(', ')}`);
+  console.log(`   Auto-renewal: Every 5 minutes for all subscriptions`);
 });
 
 // ==================== TEAMS POLLING ====================
@@ -799,7 +639,7 @@ async function pollTeamsMessages() {
           seenMessageIds.add(message.id);
           
           // Create persistent session key
-          const persistentSessionKey = `teams:chat:${chatId}`;
+          const persistentSessionKey = `hook:teams:${chatId}`;
           
           // Format message for agent
           const replyScript = agent === 'sophia' 
