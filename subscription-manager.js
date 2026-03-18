@@ -77,7 +77,72 @@ class SubscriptionManager {
   }
   
   /**
-   * Create or renew a subscription
+   * Find existing subscription by clientState
+   */
+  async findExistingSubscription(clientState) {
+    if (!this.client) await this.initializeClient();
+    
+    try {
+      const response = await this.client
+        .api('/subscriptions')
+        .get();
+      
+      // Find subscription matching this clientState
+      const existing = response.value.find(sub => sub.clientState === clientState);
+      return existing || null;
+    } catch (error) {
+      console.warn(`[${this.agentName}] Could not list subscriptions:`, error.message);
+      return null;
+    }
+  }
+  
+  /**
+   * Delete all existing subscriptions for a resource (prevents duplicates)
+   */
+  async deleteExistingSubscriptions(resource, notificationUrl) {
+    if (!this.client) await this.initializeClient();
+    
+    try {
+      const response = await this.client
+        .api('/subscriptions')
+        .get();
+      
+      // Find all subscriptions matching this resource and notificationUrl
+      const existing = response.value.filter(sub => 
+        sub.resource === resource && sub.notificationUrl === notificationUrl
+      );
+      
+      if (existing.length > 0) {
+        console.log(`[${this.agentName}] Found ${existing.length} existing subscription(s) for ${resource}`);
+        
+        // Sort by expiration (newest last)
+        existing.sort((a, b) => new Date(a.expirationDateTime) - new Date(b.expirationDateTime));
+        
+        // Delete all except the newest one
+        for (let i = 0; i < existing.length - 1; i++) {
+          console.log(`[${this.agentName}] Deleting old subscription: ${existing[i].id}`);
+          try {
+            await this.client
+              .api(`/subscriptions/${existing[i].id}`)
+              .delete();
+          } catch (delError) {
+            console.warn(`[${this.agentName}] Failed to delete ${existing[i].id}:`, delError.message);
+          }
+        }
+        
+        // Return the newest one to renew it
+        return existing[existing.length - 1];
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn(`[${this.agentName}] Could not clean duplicates:`, error.message);
+      return null;
+    }
+  }
+  
+  /**
+   * Create or renew a subscription (with duplicate prevention)
    */
   async ensureSubscription(subscriptionDef) {
     if (!this.client) await this.initializeClient();
@@ -85,23 +150,31 @@ class SubscriptionManager {
     const { resource, changeType, notificationUrl, clientState, maxExpirationMinutes } = subscriptionDef;
     
     try {
-      // Check if subscription already exists
-      const existingId = this.activeSubscriptions.get(clientState);
+      // Clean up duplicates first (keeps newest, deletes old ones)
+      const existingSub = await this.deleteExistingSubscriptions(resource, notificationUrl);
       
-      if (existingId) {
-        // Try to renew existing subscription
+      if (existingSub) {
+        // Try to renew the existing subscription
         try {
           const expirationDateTime = new Date(Date.now() + maxExpirationMinutes * 60 * 1000).toISOString();
           
           const renewed = await this.client
-            .api(`/subscriptions/${existingId}`)
+            .api(`/subscriptions/${existingSub.id}`)
             .patch({ expirationDateTime });
           
+          this.activeSubscriptions.set(clientState, renewed.id);
           console.log(`[${this.agentName}] Renewed subscription: ${clientState} (expires: ${renewed.expirationDateTime})`);
           return renewed;
         } catch (renewError) {
           console.log(`[${this.agentName}] Failed to renew ${clientState}, will create new:`, renewError.message);
-          // Fall through to create new subscription
+          // Delete the failed subscription and create new
+          try {
+            await this.client
+              .api(`/subscriptions/${existingSub.id}`)
+              .delete();
+          } catch (delError) {
+            // Ignore delete errors
+          }
         }
       }
       
