@@ -327,6 +327,27 @@ app.post('/webhook/teams/:agent', async (req, res) => {
         const from = fromDisplayName || 'Unknown';
         const chatType = isGroupChat ? 'GROUP' : '1:1';
         
+        // Check for attachments
+        const attachments = message.attachments || [];
+        let attachmentInfo = '';
+        
+        if (attachments.length > 0) {
+          console.log(`[${agent}] Message has ${attachments.length} attachment(s)`);
+          attachmentInfo = '\n\n📎 Attachments:\n';
+          
+          for (const attachment of attachments) {
+            const name = attachment.name || 'Unknown';
+            const contentType = attachment.contentType || 'unknown';
+            const contentUrl = attachment.contentUrl;
+            
+            attachmentInfo += `- ${name} (${contentType})\n`;
+            
+            if (contentUrl) {
+              attachmentInfo += `  URL: ${contentUrl}\n`;
+            }
+          }
+        }
+        
         console.log(`[${agent}] [${chatType}] Teams message from ${from}: ${content.substring(0, 50)}...`);
         
         // Format message text with agent-specific reply command
@@ -334,9 +355,9 @@ app.post('/webhook/teams/:agent', async (req, res) => {
           ? 'node sophia-teams-reply.js' 
           : agent === 'kim'
           ? 'node kim-teams-reply.js'
-          : 'node ~/clawd/max-teams-reply.js';
+          : 'node ~/clawd/memory/projects/microsoft-integration/scripts/max-teams-reply.js';
         
-        const wakeText = `💬 Teams message from ${from}: "${content}"\n\nChat ID: ${chatId}\n\nPlease respond to this Teams message using:\n${replyScript} "${chatId}" "<your reply in HTML format>"`;
+        const wakeText = `💬 Teams message from ${from}: "${content}"${attachmentInfo}\n\nChat ID: ${chatId}\n\nPlease respond to this Teams message using:\n${replyScript} "${chatId}" "<your reply in HTML format>"`;
         
         // Create persistent session key based on chatId
         // This maintains conversation context across messages
@@ -378,7 +399,7 @@ app.post('/webhook/teams/:agent', async (req, res) => {
 
 // Send Teams message
 app.post('/api/teams/send', async (req, res) => {
-  const { agent, chatId, message } = req.body;
+  const { agent, chatId, message, attachments } = req.body;
   
   if (!agent || !chatId || !message) {
     return res.status(400).json({ error: 'Missing required fields: agent, chatId, message' });
@@ -386,6 +407,24 @@ app.post('/api/teams/send', async (req, res) => {
   
   try {
     const token = await getAccessToken(agent);
+    
+    const messagePayload = {
+      body: {
+        contentType: 'html',
+        content: message
+      }
+    };
+    
+    // Add attachments if provided
+    if (attachments && attachments.length > 0) {
+      messagePayload.attachments = attachments.map(att => ({
+        id: att.id || crypto.randomUUID(),
+        contentType: att.contentType || 'reference',
+        contentUrl: att.contentUrl,
+        name: att.name
+      }));
+    }
+    
     const response = await fetch(
       `https://graph.microsoft.com/v1.0/me/chats/${chatId}/messages`,
       {
@@ -394,17 +433,13 @@ app.post('/api/teams/send', async (req, res) => {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          body: {
-            contentType: 'html',
-            content: message
-          }
-        })
+        body: JSON.stringify(messagePayload)
       }
     );
     
     if (response.status === 201) {
-      console.log(`[${agent}] Sent Teams message to ${chatId}`);
+      const sent = await response.json();
+      console.log(`[${agent}] Sent Teams message to ${chatId}${attachments?.length ? ` with ${attachments.length} attachment(s)` : ''}`);
       
       // Update presence to Available after sending message
       try {
@@ -425,13 +460,80 @@ app.post('/api/teams/send', async (req, res) => {
         console.warn(`[${agent}] Could not update presence:`, presenceError.message);
       }
       
-      res.json({ success: true });
+      res.json({ success: true, messageId: sent.id });
     } else {
       const error = await response.text();
       throw new Error(`Failed to send: ${error}`);
     }
   } catch (error) {
     console.error(`[${agent}] Teams send error:`, error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Upload file to OneDrive and get sharing link for Teams
+app.post('/api/teams/upload', async (req, res) => {
+  const { agent, fileName, fileContent, contentType } = req.body;
+  
+  if (!agent || !fileName || !fileContent) {
+    return res.status(400).json({ error: 'Missing required fields: agent, fileName, fileContent' });
+  }
+  
+  try {
+    const token = await getAccessToken(agent);
+    
+    // Upload to OneDrive
+    const uploadPath = `/me/drive/root:/TeamsAttachments/${fileName}:/content`;
+    const buffer = Buffer.from(fileContent, 'base64');
+    
+    const uploadResp = await fetch(
+      `https://graph.microsoft.com/v1.0${uploadPath}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': contentType || 'application/octet-stream'
+        },
+        body: buffer
+      }
+    );
+    
+    if (!uploadResp.ok) {
+      throw new Error(`Upload failed: ${await uploadResp.text()}`);
+    }
+    
+    const file = await uploadResp.json();
+    
+    // Create sharing link
+    const shareResp = await fetch(
+      `https://graph.microsoft.com/v1.0/me/drive/items/${file.id}/createLink`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          type: 'view',
+          scope: 'organization'
+        })
+      }
+    );
+    
+    const shareLink = await shareResp.json();
+    
+    console.log(`[${agent}] Uploaded file: ${fileName} (${file.size} bytes)`);
+    
+    res.json({
+      success: true,
+      fileId: file.id,
+      fileName: file.name,
+      webUrl: file.webUrl,
+      shareUrl: shareLink.link?.webUrl
+    });
+    
+  } catch (error) {
+    console.error(`[${agent}] Upload error:`, error.message);
     res.status(500).json({ error: error.message });
   }
 });
