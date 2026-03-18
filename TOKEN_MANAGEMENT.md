@@ -110,13 +110,44 @@ See Azure documentation: https://docs.microsoft.com/en-us/azure/active-directory
 
 ### How It Works
 
-The middleware automatically refreshes tokens **before they expire**:
+The middleware uses **TWO refresh mechanisms** for reliability:
 
-1. **Check on every API call:**
-   - Calculate: `expiresAt = obtained_at + (expires_in * 1000)`
-   - Current time > `expiresAt - 5 minutes` → Refresh
+#### Mechanism 1: On-Demand Refresh (Reactive)
 
-2. **Refresh process:**
+Checks on every API call:
+- Calculate: `expiresAt = obtained_at + (expires_in * 1000)`
+- Current time > `expiresAt - 5 minutes` → Refresh
+
+#### Mechanism 2: Proactive Refresh Timer (Scheduled)
+
+Independent timer checks all tokens every 30 minutes:
+- Reads token file directly
+- Calculates minutes until expiry
+- Logs token status for each agent
+- Refreshes if expiring within 10 minutes
+
+**Why Both?**
+- On-demand: Handles high-traffic scenarios
+- Proactive: Ensures tokens stay fresh even during idle periods
+- Redundancy: If one fails, the other catches it
+
+2. **Proactive timer checks (every 30 minutes):**
+   ```javascript
+   // Read token file
+   tokens = readTokenFile()
+   expiresAt = tokens.obtained_at + (tokens.expires_in * 1000)
+   minutesRemaining = (expiresAt - now) / 60000
+   
+   // Log status
+   console.log(`Token valid for ${minutesRemaining} minutes`)
+   
+   // Refresh if expiring soon
+   if (minutesRemaining < 10) {
+     refreshToken()
+   }
+   ```
+
+3. **Refresh process:**
    ```javascript
    POST https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
    
@@ -128,7 +159,7 @@ The middleware automatically refreshes tokens **before they expire**:
    - scope: "https://graph.microsoft.com/.default"
    ```
 
-3. **Update token file atomically:**
+4. **Update token file atomically:**
    - Write to `.tmp` file first
    - Rename to actual file (atomic operation)
    - Prevents corruption if process crashes mid-write
@@ -294,27 +325,54 @@ try {
 
 ## 8. Monitoring Token Health
 
-### Daily Checks
+### Proactive Monitoring (Automatic)
+
+The server logs token status every 30 minutes:
+
+```bash
+[max] Token valid for 31 minutes
+[sophia] Token valid for 48 minutes
+```
+
+If expiring soon (< 10 min):
+```bash
+[max] Proactive token refresh (8 min remaining)...
+[max] ✓ Token refreshed proactively
+```
+
+### Manual Checks
 
 ```bash
 # Check token file exists and is readable
 ls -l ~/clawd/*-microsoft-tokens.json
 
-# Check token expiry
+# Check current token expiry
 node -e "
 const tokens = require('./max-microsoft-tokens.json');
 const expiresAt = new Date(tokens.obtained_at + tokens.expires_in * 1000);
 console.log('Access token expires:', expiresAt);
 console.log('Valid for:', Math.floor((expiresAt - Date.now()) / 60000), 'minutes');
 "
+
+# Watch token refresh logs in real-time
+tail -f server.log | grep -E "Token valid|Token refresh"
 ```
 
-### Server Logs
+### Server Logs - What to Look For
 
-Look for:
-- `✓ Token refreshed successfully` - Good, working
+✅ **Good Signs:**
+- `Token valid for X minutes` (logged every 30 min)
+- `✓ Token refreshed successfully` (when refreshed)
+- `✓ Token refreshed proactively` (proactive timer working)
+
+⚠️ **Warning Signs:**
+- `Token valid for 5 minutes` (expiring soon, watch for refresh)
+- `Proactive token refresh (X min remaining)` (proactive refresh triggered)
+
+❌ **Error Signs:**
 - `Token refresh failed: invalid_grant` - Re-auth needed
 - `Failed to read token file` - File missing or corrupted
+- `Token expired X minutes ago` - Refresh failed, immediate action needed
 
 ---
 

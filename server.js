@@ -802,12 +802,59 @@ async function initializeAgentUserIds() {
   }
 }
 
-// Initialize user IDs then start auto-renewal
+/**
+ * Proactive token refresh timer
+ * Checks and refreshes tokens every 30 minutes
+ * Ensures tokens stay fresh even if no API calls are made
+ */
+function startTokenRefreshTimer() {
+  const REFRESH_INTERVAL = 30 * 60 * 1000; // 30 minutes
+  
+  async function checkAndRefreshTokens() {
+    for (const [agentName, config] of Object.entries(AGENTS)) {
+      try {
+        // Read current token
+        const tokens = JSON.parse(fs.readFileSync(config.tokenFile, 'utf8'));
+        const expiresAt = tokens.obtained_at + (tokens.expires_in * 1000);
+        const minutesUntilExpiry = Math.floor((expiresAt - Date.now()) / 60000);
+        
+        // Log token status
+        if (minutesUntilExpiry > 0) {
+          console.log(`[${agentName}] Token valid for ${minutesUntilExpiry} minutes`);
+        } else {
+          console.log(`[${agentName}] Token expired ${Math.abs(minutesUntilExpiry)} minutes ago`);
+        }
+        
+        // Proactively refresh if expiring within 10 minutes
+        if (minutesUntilExpiry < 10) {
+          console.log(`[${agentName}] Proactive token refresh (${minutesUntilExpiry} min remaining)...`);
+          await getAccessToken(agentName); // This will trigger refresh
+          console.log(`[${agentName}] ✓ Token refreshed proactively`);
+        }
+      } catch (error) {
+        console.error(`[${agentName}] Token refresh check error:`, error.message);
+      }
+    }
+  }
+  
+  // Run immediately on startup
+  setTimeout(checkAndRefreshTokens, 10000); // 10 seconds after startup
+  
+  // Then every 30 minutes
+  setInterval(checkAndRefreshTokens, REFRESH_INTERVAL);
+  
+  console.log('Token refresh timer started (checks every 30 minutes)');
+}
+
+// Initialize user IDs then start services
 initializeAgentUserIds().then(() => {
-  // Start auto-renewal for all agents
+  // Start subscription auto-renewal for all agents
   for (const [agentName, manager] of Object.entries(subscriptionManagers)) {
     manager.startAutoRenewal();
   }
+  
+  // Start proactive token refresh timer
+  startTokenRefreshTimer();
 });
 
 // ==================== START SERVER ====================
@@ -817,7 +864,8 @@ app.listen(PORT, () => {
   console.log(`   Agents: ${Object.keys(AGENTS).join(', ')}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
   console.log(`   Subscription managers: ${Object.keys(subscriptionManagers).join(', ')}`);
-  console.log(`   Auto-renewal: Every 5 minutes for all subscriptions`);
+  console.log(`   Subscription auto-renewal: Every 5 minutes`);
+  console.log(`   Token refresh checks: Every 30 minutes (proactive)`);
 });
 
 // ==================== WEBHOOKS ONLY ====================
