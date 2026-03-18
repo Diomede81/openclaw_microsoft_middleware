@@ -24,7 +24,7 @@ const AGENTS = {
   max: {
     name: 'Max',
     displayName: 'Max Ferretti', // Actual Teams display name
-    userId: '15f6df21-5683-40eb-b385-30154a4d6c02', // Microsoft Graph user ID
+    userId: null, // Will be fetched from /me at startup
     clientId: '79b3f60a-ddfe-4029-8af4-1c95a37c6aa7',
     tenantId: '982780f8-0424-4e57-9cc0-bee3d6acc797',
     tokenFile: '/home/lucalicata/clawd/max-microsoft-tokens.json',
@@ -35,6 +35,7 @@ const AGENTS = {
   sophia: {
     name: 'Sophia',
     displayName: 'Sophia', // Actual Teams display name
+    userId: null, // Will be fetched from /me at startup
     clientId: '50d301c0-ad4f-458b-95ec-f3c966f60f6c',
     tenantId: 'f2b38637-cb43-45b5-a5e8-e7a09fe436bb',
     tokenFile: '/home/lucalicata/clawd/sophia-microsoft-tokens.json',
@@ -211,10 +212,26 @@ app.post('/webhook/teams/:agent', async (req, res) => {
         // FILTER 5: If group chat, check if agent is @mentioned
         if (isGroupChat) {
           const mentions = message.mentions || [];
-          // Check by user ID (more reliable than displayName which can be "Max" or "Max Ferretti")
-          const agentMentioned = mentions.some(m => 
-            m.mentioned?.user?.id === config.userId
-          );
+          
+          // Check by user ID (most reliable) or displayName
+          // Mentions can split names ("Max" + "Ferretti") so check if ANY mention matches
+          const agentMentioned = mentions.some(m => {
+            const mentionedUser = m.mentioned?.user;
+            if (!mentionedUser) return false;
+            
+            // Check 1: User ID match (if we have it)
+            if (config.userId && mentionedUser.id === config.userId) {
+              return true;
+            }
+            
+            // Check 2: DisplayName contains any part of our name
+            const mentionedName = mentionedUser.displayName?.toLowerCase() || '';
+            const ourName = config.displayName.toLowerCase();
+            const nameParts = ourName.split(' ');
+            
+            // If mentioned name matches full name or any part of it
+            return mentionedName === ourName || nameParts.some(part => mentionedName === part);
+          });
           
           if (!agentMentioned) {
             console.log(`[${agent}] Skipping group chat message (not @mentioned). Chat: ${chat.topic || 'Unnamed'}`);
@@ -679,12 +696,37 @@ app.get('/status/:agent', async (req, res) => {
   }
 });
 
-// ==================== AUTO-RENEWAL (via SubscriptionManager) ====================
+// ==================== INITIALIZATION ====================
 
-// Start auto-renewal for all agents
-for (const [agentName, manager] of Object.entries(subscriptionManagers)) {
-  manager.startAutoRenewal();
+// Fetch user IDs for all agents at startup
+async function initializeAgentUserIds() {
+  for (const [agentName, config] of Object.entries(AGENTS)) {
+    try {
+      const token = await getAccessToken(agentName);
+      const response = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const user = await response.json();
+      
+      if (user.id) {
+        AGENTS[agentName].userId = user.id;
+        console.log(`[${agentName}] Fetched user ID: ${user.id} (${user.displayName})`);
+      } else {
+        console.warn(`[${agentName}] Could not fetch user ID`);
+      }
+    } catch (error) {
+      console.error(`[${agentName}] Error fetching user ID:`, error.message);
+    }
+  }
 }
+
+// Initialize user IDs then start auto-renewal
+initializeAgentUserIds().then(() => {
+  // Start auto-renewal for all agents
+  for (const [agentName, manager] of Object.entries(subscriptionManagers)) {
+    manager.startAutoRenewal();
+  }
+});
 
 // ==================== START SERVER ====================
 
