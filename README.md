@@ -38,8 +38,8 @@ ms-middleware init
 nano .env
 
 # 4. Generate OAuth tokens for your agents
-ms-middleware token max
-ms-middleware token-device kim  # For headless environments
+ms-middleware token <agent-name>
+ms-middleware token-device <agent-name>  # For headless environments
 
 # 5. Start the server
 ms-middleware start
@@ -61,6 +61,7 @@ systemctl --user start ms-middleware
 | `ms-middleware subscriptions [agent]` | List active Graph subscriptions |
 | `ms-middleware status` | Check if server is running |
 | `ms-middleware install-service [name]` | Create systemd user service |
+| `ms-middleware help` | Show help |
 
 ## Updating
 
@@ -84,15 +85,16 @@ Copy `.env.example` to `.env` and configure your agents:
 PORT=3007
 PUBLIC_URL=https://your-webhook-domain.com
 
-# Agent: MAX
-MAX_CLIENT_ID=your-azure-client-id
-MAX_TENANT_ID=your-azure-tenant-id
-MAX_TOKEN_FILE=/path/to/max-tokens.json
-MAX_GATEWAY_URL=http://localhost:18789/hooks/agent
-MAX_GATEWAY_TOKEN=your-gateway-token
+# Agent configuration (repeat for each agent)
+# Replace AGENTNAME with your agent's name in uppercase
+AGENTNAME_CLIENT_ID=your-azure-client-id
+AGENTNAME_TENANT_ID=your-azure-tenant-id
+AGENTNAME_TOKEN_FILE=/path/to/agentname-tokens.json
+AGENTNAME_GATEWAY_URL=http://localhost:18789/hooks/agent
+AGENTNAME_GATEWAY_TOKEN=your-gateway-token
 
-# Add more agents as needed...
-ENABLED_AGENTS=max,sophia,kim
+# List all enabled agents (comma-separated)
+ENABLED_AGENTS=agentname1,agentname2
 ```
 
 See `.env.example` for all available options.
