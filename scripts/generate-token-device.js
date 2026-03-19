@@ -4,12 +4,22 @@
  * For headless/CLI environments without browser access
  * 
  * Usage: 
- *   node generate-token-device.js                    # Uses .env defaults
- *   node generate-token-device.js --agent max        # Generate token for specific agent
+ *   ms-middleware token-device <agent>               # Via CLI
+ *   node generate-token-device.js --agent max        # Direct invocation
  *   AGENT_NAME=kim node generate-token-device.js    # Via environment variable
  */
 
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+const path = require('path');
+const fs = require('fs');
+
+// Load .env from cwd first, then package directory
+const cwdEnv = path.join(process.cwd(), '.env');
+const pkgEnv = path.join(__dirname, '..', '.env');
+if (fs.existsSync(cwdEnv)) {
+  require('dotenv').config({ path: cwdEnv });
+} else if (fs.existsSync(pkgEnv)) {
+  require('dotenv').config({ path: pkgEnv });
+}
 
 const fs = require('fs');
 const path = require('path');

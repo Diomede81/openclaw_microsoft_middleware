@@ -9,7 +9,17 @@
  *   node create-test-subscription.js --agent sophia --resource teams
  */
 
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+const path = require('path');
+const fs = require('fs');
+
+// Load .env from cwd first, then package directory
+const cwdEnv = path.join(process.cwd(), '.env');
+const pkgEnv = path.join(__dirname, '..', '.env');
+if (fs.existsSync(cwdEnv)) {
+  require('dotenv').config({ path: cwdEnv });
+} else if (fs.existsSync(pkgEnv)) {
+  require('dotenv').config({ path: pkgEnv });
+}
 
 const fs = require('fs');
 
