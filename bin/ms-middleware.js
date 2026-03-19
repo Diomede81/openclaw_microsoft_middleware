@@ -94,6 +94,83 @@ const commands = {
     }
   },
   
+  sessions: async () => {
+    const subcommand = args[0];
+    const port = process.env.PORT || 3007;
+    const baseUrl = `http://localhost:${port}`;
+    
+    if (!subcommand || subcommand === 'stats') {
+      // Show session statistics
+      try {
+        const resp = await fetch(`${baseUrl}/sessions`);
+        const stats = await resp.json();
+        console.log('\n📊 Session Store Statistics\n');
+        console.log(`   Database: ${stats.dbPath}`);
+        console.log(`   Total sessions: ${stats.totalSessions}`);
+        console.log(`   Total messages: ${stats.totalMessages}`);
+        console.log(`   Max messages per session: ${stats.maxMessages}`);
+        console.log(`   Messages injected per prompt: ${stats.injectMessages}\n`);
+      } catch (err) {
+        console.error('Error: Server not running or not reachable');
+      }
+      return;
+    }
+    
+    if (subcommand === 'list') {
+      // List sessions for an agent
+      const agent = args[1];
+      if (!agent) {
+        console.error('Usage: ms-middleware sessions list <agent>');
+        process.exit(1);
+      }
+      try {
+        const resp = await fetch(`${baseUrl}/sessions/${agent}`);
+        const data = await resp.json();
+        console.log(`\n📋 Sessions for ${agent}\n`);
+        if (data.sessions.length === 0) {
+          console.log('   No sessions found.\n');
+        } else {
+          for (const s of data.sessions) {
+            console.log(`   ${s.channel}:${s.chat_id.substring(0, 30)}...`);
+            console.log(`      Messages: ${s.message_count}, Updated: ${s.updated_at}\n`);
+          }
+        }
+      } catch (err) {
+        console.error('Error:', err.message);
+      }
+      return;
+    }
+    
+    if (subcommand === 'clear') {
+      // Clear a specific session
+      const agent = args[1];
+      const chatId = args[2];
+      if (!agent || !chatId) {
+        console.error('Usage: ms-middleware sessions clear <agent> <chatId>');
+        process.exit(1);
+      }
+      try {
+        const resp = await fetch(`${baseUrl}/sessions/${agent}/teams/${encodeURIComponent(chatId)}`, {
+          method: 'DELETE'
+        });
+        const data = await resp.json();
+        console.log(`\n✅ Cleared session: ${data.cleared}\n`);
+      } catch (err) {
+        console.error('Error:', err.message);
+      }
+      return;
+    }
+    
+    console.log(`
+Usage: ms-middleware sessions <command>
+
+Commands:
+  stats              Show session store statistics
+  list <agent>       List all sessions for an agent
+  clear <agent> <chatId>  Clear messages from a session
+`);
+  },
+  
   'install-service': async () => {
     const serviceName = args[0] || 'ms-middleware';
     const workDir = process.cwd();
@@ -192,21 +269,33 @@ Commands:
   token <agent>            Generate OAuth token (browser flow)
   token-device <agent>     Generate OAuth token (device code flow)
   subscriptions [agent]    List active Microsoft Graph subscriptions
+  sessions [subcommand]    Manage conversation history sessions
   status                   Check if server is running
   install-service [name]   Create systemd user service file
   docs [topic]             Show documentation (install, teams, tokens, setup)
+
+Session Commands:
+  sessions stats           Show session store statistics
+  sessions list <agent>    List all sessions for an agent
+  sessions clear <agent> <chatId>  Clear messages from a session
 
 Examples:
   ms-middleware init
   ms-middleware start
   ms-middleware token max
   ms-middleware subscriptions kim
+  ms-middleware sessions list sophia
   ms-middleware install-service my-middleware
   ms-middleware docs install
 
 Environment:
   Config is loaded from .env in current directory or package directory.
   Copy .env.example to .env and configure your agents.
+  
+Session store config (optional in .env):
+  SESSION_MAX_MESSAGES=30       Max messages before truncation
+  SESSION_INJECT_MESSAGES=10    Messages to inject into prompt
+  SESSION_DB_PATH=./data/sessions.db   Database location
 
 Documentation:
   https://github.com/Diomede81/openclaw_microsoft_middleware
