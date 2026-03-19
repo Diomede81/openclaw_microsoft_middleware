@@ -481,6 +481,145 @@ Clear messages from a session.
 
 ---
 
+### Email API
+
+#### GET /api/email/list/:agent
+List recent emails.
+
+**Query params:** `top` (default: 10), `folder` (default: inbox)
+
+```bash
+curl "http://localhost:3007/api/email/list/max?top=5"
+```
+
+#### GET /api/email/read/:agent/:messageId
+Read a specific email.
+
+```bash
+curl "http://localhost:3007/api/email/read/max/AAMkAD..."
+```
+
+#### GET /api/email/search/:agent
+Search emails.
+
+**Query params:** `q` (required), `top` (default: 10), `folder` (default: inbox)
+
+```bash
+curl "http://localhost:3007/api/email/search/max?q=invoice&top=5"
+```
+
+#### POST /api/email/send
+Send a new email.
+
+**Request Body:**
+```json
+{
+  "agent": "max",
+  "to": "recipient@example.com",
+  "subject": "Hello",
+  "body": "<p>Email body in HTML</p>"
+}
+```
+
+#### POST /api/email/reply
+Reply to an email.
+
+**Request Body:**
+```json
+{
+  "agent": "max",
+  "messageId": "AAMkAD...",
+  "body": "<p>Reply content</p>",
+  "replyAll": false
+}
+```
+
+#### POST /api/email/forward
+Forward an email.
+
+**Request Body:**
+```json
+{
+  "agent": "max",
+  "messageId": "AAMkAD...",
+  "to": "recipient@example.com",
+  "comment": "FYI"
+}
+```
+
+#### DELETE /api/email/:agent/:messageId
+Delete an email.
+
+```bash
+curl -X DELETE "http://localhost:3007/api/email/max/AAMkAD..."
+```
+
+---
+
+### Calendar API
+
+#### GET /api/calendar/list/:agent
+List upcoming calendar events.
+
+**Query params:** `days` (default: 7)
+
+```bash
+curl "http://localhost:3007/api/calendar/list/max?days=14"
+```
+
+#### GET /api/calendar/event/:agent/:eventId
+Get a specific event.
+
+```bash
+curl "http://localhost:3007/api/calendar/event/max/AAMkAD..."
+```
+
+#### GET /api/calendar/search/:agent
+Search calendar events.
+
+**Query params:** `q` (required), `days` (default: 30)
+
+```bash
+curl "http://localhost:3007/api/calendar/search/max?q=meeting&days=14"
+```
+
+#### POST /api/calendar/create
+Create a calendar event.
+
+**Request Body:**
+```json
+{
+  "agent": "max",
+  "subject": "Team Meeting",
+  "start": "2026-03-20T10:00:00",
+  "end": "2026-03-20T11:00:00",
+  "location": "Conference Room",
+  "attendees": ["colleague@example.com"]
+}
+```
+
+#### PUT /api/calendar/event/:agent/:eventId
+Update a calendar event.
+
+**Request Body:**
+```json
+{
+  "subject": "Updated Title",
+  "start": "2026-03-20T11:00:00",
+  "end": "2026-03-20T12:00:00",
+  "location": "New Location"
+}
+```
+
+#### DELETE /api/calendar/event/:agent/:eventId
+Delete a calendar event.
+
+```bash
+curl -X DELETE "http://localhost:3007/api/calendar/event/max/AAMkAD..."
+```
+
+---
+
 ### Webhook Endpoints
 
 These endpoints receive notifications from Microsoft Graph.
