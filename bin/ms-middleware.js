@@ -29,7 +29,7 @@ const command = process.argv[2];
 const args = process.argv.slice(3);
 
 const commands = {
-  start: () => require('../lib/server'),
+  start: async () => require('../lib/server'),
   
   init: async () => {
     const targetDir = process.cwd();
