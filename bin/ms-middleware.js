@@ -171,6 +171,132 @@ Commands:
 `);
   },
   
+  tunnel: async () => {
+    const CloudflareTunnel = require('../lib/cloudflare/tunnel');
+    const subcommand = args[0];
+    
+    const tunnel = new CloudflareTunnel();
+    
+    if (!subcommand || subcommand === 'status') {
+      try {
+        await tunnel.status();
+      } catch (err) {
+        console.error('Error:', err.message);
+        if (err.message.includes('Missing required config')) {
+          console.log('\nAdd to your .env:');
+          console.log('  CLOUDFLARE_API_TOKEN=your_token');
+          console.log('  CLOUDFLARE_ACCOUNT_ID=your_account_id');
+          console.log('  CLOUDFLARE_DOMAIN=yourdomain.com');
+          console.log('  CLOUDFLARE_SUBDOMAIN=microsoft  # optional, default: microsoft');
+        }
+      }
+      return;
+    }
+    
+    if (subcommand === 'setup') {
+      try {
+        await tunnel.setup();
+      } catch (err) {
+        console.error('Error:', err.message);
+      }
+      return;
+    }
+    
+    if (subcommand === 'run') {
+      try {
+        tunnel.runTunnel();
+      } catch (err) {
+        console.error('Error:', err.message);
+      }
+      return;
+    }
+    
+    if (subcommand === 'create') {
+      try {
+        tunnel.validate();
+        await tunnel.createTunnel(tunnel.tunnelName);
+      } catch (err) {
+        console.error('Error:', err.message);
+      }
+      return;
+    }
+    
+    if (subcommand === 'delete') {
+      try {
+        tunnel.validate();
+        const t = await tunnel.getTunnelByName(tunnel.tunnelName);
+        if (t) {
+          await tunnel.deleteTunnel(t.id);
+        } else {
+          console.log('Tunnel not found');
+        }
+      } catch (err) {
+        console.error('Error:', err.message);
+      }
+      return;
+    }
+    
+    if (subcommand === 'dns') {
+      try {
+        tunnel.validate();
+        const t = await tunnel.getTunnelByName(tunnel.tunnelName);
+        if (t) {
+          await tunnel.configureDNS(t.id);
+        } else {
+          console.log('Tunnel not found. Run: ms-middleware tunnel create');
+        }
+      } catch (err) {
+        console.error('Error:', err.message);
+      }
+      return;
+    }
+    
+    if (subcommand === 'config') {
+      try {
+        tunnel.validate();
+        const t = await tunnel.getTunnelByName(tunnel.tunnelName);
+        if (t) {
+          tunnel.generateConfig(t.id);
+        } else {
+          console.log('Tunnel not found. Run: ms-middleware tunnel create');
+        }
+      } catch (err) {
+        console.error('Error:', err.message);
+      }
+      return;
+    }
+    
+    if (subcommand === 'service') {
+      try {
+        tunnel.generateService();
+      } catch (err) {
+        console.error('Error:', err.message);
+      }
+      return;
+    }
+    
+    console.log(`
+Usage: ms-middleware tunnel <command>
+
+Commands:
+  status             Show tunnel status
+  setup              Full setup: create tunnel, DNS, config, service
+  run                Run cloudflared tunnel (foreground)
+  create             Create a new tunnel
+  delete             Delete the tunnel
+  dns                Configure DNS record
+  config             Generate cloudflared config file
+  service            Generate systemd service file
+
+Configuration (.env):
+  CLOUDFLARE_API_TOKEN     API token with Tunnel permissions
+  CLOUDFLARE_ACCOUNT_ID    Your Cloudflare account ID
+  CLOUDFLARE_DOMAIN        Your domain (e.g., example.com)
+  CLOUDFLARE_SUBDOMAIN     Subdomain for webhook (default: microsoft)
+  CLOUDFLARE_TUNNEL_NAME   Tunnel name (default: ms-middleware)
+`);
+  },
+  
   'install-service': async () => {
     const serviceName = args[0] || 'ms-middleware';
     const workDir = process.cwd();
@@ -270,6 +396,7 @@ Commands:
   token-device <agent>     Generate OAuth token (device code flow)
   subscriptions [agent]    List active Microsoft Graph subscriptions
   sessions [subcommand]    Manage conversation history sessions
+  tunnel [subcommand]      Manage Cloudflare tunnel for webhooks
   status                   Check if server is running
   install-service [name]   Create systemd user service file
   docs [topic]             Show documentation (install, teams, tokens, setup)
@@ -279,11 +406,18 @@ Session Commands:
   sessions list <agent>    List all sessions for an agent
   sessions clear <agent> <chatId>  Clear messages from a session
 
+Tunnel Commands:
+  tunnel status            Show tunnel status
+  tunnel setup             Full setup: create tunnel, DNS, config, service
+  tunnel run               Run cloudflared tunnel (foreground)
+  tunnel create            Create a new tunnel
+  tunnel delete            Delete the tunnel
+
 Examples:
   ms-middleware init
   ms-middleware start
   ms-middleware token max
-  ms-middleware subscriptions kim
+  ms-middleware tunnel setup
   ms-middleware sessions list sophia
   ms-middleware install-service my-middleware
   ms-middleware docs install
@@ -296,6 +430,12 @@ Session store config (optional in .env):
   SESSION_MAX_MESSAGES=30       Max messages before truncation
   SESSION_INJECT_MESSAGES=10    Messages to inject into prompt
   SESSION_DB_PATH=./data/sessions.db   Database location
+
+Cloudflare tunnel config (optional in .env):
+  CLOUDFLARE_API_TOKEN          API token with Tunnel permissions
+  CLOUDFLARE_ACCOUNT_ID         Your Cloudflare account ID
+  CLOUDFLARE_DOMAIN             Your domain (e.g., example.com)
+  CLOUDFLARE_SUBDOMAIN          Subdomain for webhook (default: microsoft)
 
 Documentation:
   https://github.com/Diomede81/openclaw_microsoft_middleware
