@@ -2,6 +2,22 @@
 
 Microsoft 365 (Teams, Email, Calendar) integration middleware for OpenClaw agents.
 
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [AGENT_INSTALL_GUIDE.md](./AGENT_INSTALL_GUIDE.md) | Complete installation walkthrough with troubleshooting |
+| [AGENT_TEAMS_SETUP.md](./AGENT_TEAMS_SETUP.md) | Setting up Teams integration for new agents |
+| [TOKEN_MANAGEMENT.md](./TOKEN_MANAGEMENT.md) | OAuth token lifecycle and refresh |
+| [SETUP.md](./SETUP.md) | Azure AD app registration setup |
+
+**Quick access from CLI:**
+```bash
+ms-middleware docs              # Open documentation in browser
+ms-middleware docs install      # Show installation guide
+ms-middleware docs teams        # Show Teams setup guide
+```
+
 ## Installation
 
 ### From npm (recommended)

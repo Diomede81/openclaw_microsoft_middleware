@@ -134,6 +134,52 @@ WantedBy=default.target
     console.log(`   systemctl --user status ${serviceName}\n`);
   },
   
+  docs: async () => {
+    const docType = args[0];
+    const pkgDir = path.join(__dirname, '..');
+    
+    const docs = {
+      install: 'AGENT_INSTALL_GUIDE.md',
+      teams: 'AGENT_TEAMS_SETUP.md',
+      tokens: 'TOKEN_MANAGEMENT.md',
+      setup: 'SETUP.md',
+      attachments: 'ATTACHMENTS.md',
+      resources: 'SUPPORTED_RESOURCES.md'
+    };
+    
+    if (!docType) {
+      // List all docs
+      console.log('\n📚 Microsoft Middleware Documentation\n');
+      console.log('Available guides:');
+      console.log('  ms-middleware docs install      Installation guide');
+      console.log('  ms-middleware docs teams        Teams setup for agents');
+      console.log('  ms-middleware docs tokens       Token management');
+      console.log('  ms-middleware docs setup        Azure AD app setup');
+      console.log('  ms-middleware docs attachments  Email attachments');
+      console.log('  ms-middleware docs resources    Supported Graph resources');
+      console.log('\nOnline: https://github.com/Diomede81/openclaw_microsoft_middleware\n');
+      return;
+    }
+    
+    const docFile = docs[docType];
+    if (!docFile) {
+      console.error(`Unknown doc: ${docType}`);
+      console.error('Available: ' + Object.keys(docs).join(', '));
+      process.exit(1);
+    }
+    
+    const docPath = path.join(pkgDir, docFile);
+    if (!fs.existsSync(docPath)) {
+      console.error(`Doc file not found: ${docPath}`);
+      process.exit(1);
+    }
+    
+    // Print the doc content
+    console.log('\n' + '='.repeat(60));
+    console.log(fs.readFileSync(docPath, 'utf8'));
+    console.log('='.repeat(60) + '\n');
+  },
+  
   help: async () => {
     console.log(`
 OpenClaw Microsoft Middleware CLI
@@ -148,6 +194,7 @@ Commands:
   subscriptions [agent]    List active Microsoft Graph subscriptions
   status                   Check if server is running
   install-service [name]   Create systemd user service file
+  docs [topic]             Show documentation (install, teams, tokens, setup)
 
 Examples:
   ms-middleware init
@@ -155,6 +202,7 @@ Examples:
   ms-middleware token max
   ms-middleware subscriptions kim
   ms-middleware install-service my-middleware
+  ms-middleware docs install
 
 Environment:
   Config is loaded from .env in current directory or package directory.
