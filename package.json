@@ -1,22 +1,46 @@
 {
-  "name": "openclaw-microsoft-middleware",
-  "version": "1.0.0",
-  "description": "Centralized Microsoft 365 (Teams, Email, Calendar) integration server for OpenClaw agents",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+  "name": "@openclaw/microsoft-middleware",
+  "version": "1.1.0",
+  "description": "Microsoft 365 (Teams, Email, Calendar) integration middleware for OpenClaw agents",
+  "main": "lib/server.js",
+  "bin": {
+    "ms-middleware": "./bin/ms-middleware.js"
   },
+  "scripts": {
+    "start": "node lib/server.js",
+    "dev": "nodemon lib/server.js",
+    "postinstall": "echo '\n✅ Run: ms-middleware init to create .env config\n'"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "scripts/",
+    "tools/",
+    ".env.example",
+    "README.md",
+    "SETUP.md"
+  ],
   "keywords": [
     "microsoft",
     "teams",
     "outlook",
     "calendar",
+    "email",
     "openclaw",
-    "middleware"
+    "middleware",
+    "webhook",
+    "graph-api"
   ],
-  "author": "Luca Licata",
+  "author": "Luca Licata <luca@tulip-tech.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Diomede81/openclaw_microsoft_middleware.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Diomede81/openclaw_microsoft_middleware/issues"
+  },
+  "homepage": "https://github.com/Diomede81/openclaw_microsoft_middleware#readme",
   "dependencies": {
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "cors": "^2.8.5",

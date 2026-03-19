@@ -1,203 +1,131 @@
 # OpenClaw Microsoft Middleware
 
-Centralized Microsoft 365 (Teams, Email, Calendar) integration server for OpenClaw agents.
-
-## Features
-
-- **Microsoft Teams**: Real-time webhooks, send messages, group chat detection, @mention filtering
-- **Email (Outlook)**: List, read, send emails, webhook notifications
-- **Calendar**: List events, create events with attendees, webhook notifications
-- **Multi-agent**: Support for unlimited OpenClaw agents via environment configuration
-- **Auto token refresh**: Automatic Microsoft token refresh
-- **Webhook validation**: Handles Microsoft Graph webhook validation
-- **Subscription management**: Create, list, renew subscriptions automatically
-- **Smart filtering**: 
-  - Own message detection (prevents loops)
-  - Old message filtering (no backfill spam)
-  - Duplicate detection
-  - Group chat silence (only forwards when @mentioned)
+Microsoft 365 (Teams, Email, Calendar) integration middleware for OpenClaw agents.
 
 ## Installation
 
+### From npm (recommended)
+
 ```bash
+npm install -g @openclaw/microsoft-middleware
+```
+
+### From GitHub
+
+```bash
+npm install -g github:Diomede81/openclaw_microsoft_middleware
+```
+
+### Or clone and link locally
+
+```bash
+git clone https://github.com/Diomede81/openclaw_microsoft_middleware.git
+cd openclaw_microsoft_middleware
 npm install
+npm link
+```
+
+## Quick Start
+
+```bash
+# 1. Create a directory for your deployment
+mkdir my-middleware && cd my-middleware
+
+# 2. Initialize configuration
+ms-middleware init
+
+# 3. Edit .env with your agent credentials
+nano .env
+
+# 4. Generate OAuth tokens for your agents
+ms-middleware token <agent-name>
+ms-middleware token-device <agent-name>  # For headless environments
+
+# 5. Start the server
+ms-middleware start
+
+# 6. (Optional) Install as systemd service
+ms-middleware install-service
+systemctl --user enable ms-middleware
+systemctl --user start ms-middleware
+```
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `ms-middleware start` | Start the middleware server |
+| `ms-middleware init` | Create .env config file in current directory |
+| `ms-middleware token <agent>` | Generate OAuth token (browser flow) |
+| `ms-middleware token-device <agent>` | Generate OAuth token (device code flow) |
+| `ms-middleware subscriptions [agent]` | List active Graph subscriptions |
+| `ms-middleware status` | Check if server is running |
+| `ms-middleware install-service [name]` | Create systemd user service |
+| `ms-middleware help` | Show help |
+
+## Updating
+
+```bash
+# Update to latest version
+npm update -g @openclaw/microsoft-middleware
+
+# Or from GitHub
+npm install -g github:Diomede81/openclaw_microsoft_middleware
+
+# Restart if running as service
+systemctl --user restart ms-middleware
 ```
 
 ## Configuration
 
-### 1. Copy environment template
+Copy `.env.example` to `.env` and configure your agents:
 
-```bash
-cp .env.example .env
+```env
+# Server
+PORT=3007
+PUBLIC_URL=https://your-webhook-domain.com
+
+# Agent configuration (repeat for each agent)
+# Replace AGENTNAME with your agent's name in uppercase
+AGENTNAME_CLIENT_ID=your-azure-client-id
+AGENTNAME_TENANT_ID=your-azure-tenant-id
+AGENTNAME_TOKEN_FILE=/path/to/agentname-tokens.json
+AGENTNAME_GATEWAY_URL=http://localhost:18789/hooks/agent
+AGENTNAME_GATEWAY_TOKEN=your-gateway-token
+
+# List all enabled agents (comma-separated)
+ENABLED_AGENTS=agentname1,agentname2
 ```
 
-### 2. Configure each agent
+See `.env.example` for all available options.
 
-Edit `.env` and add configuration for each agent. Each agent needs:
+## Features
 
-```bash
-# Agent name prefix (e.g., MAX, SOPHIA, KIM)
-{AGENT}_CLIENT_ID=your-azure-client-id
-{AGENT}_TENANT_ID=your-azure-tenant-id
-{AGENT}_TOKEN_FILE=/path/to/agent-microsoft-tokens.json
-{AGENT}_GATEWAY_URL=http://localhost:PORT/hooks/agent
-{AGENT}_GATEWAY_TOKEN=your-gateway-token
-{AGENT}_DISPLAY_NAME=Agent Display Name
-{AGENT}_AGENT_ID=agent-id (optional, defaults to lowercase agent name)
-```
-
-**Example for Max:**
-
-```bash
-MAX_CLIENT_ID=79b3f60a-ddfe-4029-8af4-1c95a37c6aa7
-MAX_TENANT_ID=982780f8-0424-4e57-9cc0-bee3d6acc797
-MAX_TOKEN_FILE=/home/user/max-microsoft-tokens.json
-MAX_GATEWAY_URL=http://localhost:18789/hooks/agent
-MAX_GATEWAY_TOKEN=your-gateway-token-here
-MAX_DISPLAY_NAME=Max Ferretti
-MAX_AGENT_ID=max
-```
-
-### 3. Ensure Microsoft token files exist
-
-Each agent needs a valid Microsoft OAuth token file at the path specified in `{AGENT}_TOKEN_FILE`.
-
-Token file format:
-```json
-{
-  "access_token": "...",
-  "refresh_token": "...",
-  "expires_in": 3600,
-  "obtained_at": 1234567890000
-}
-```
-
-## Usage
-
-### Development
-```bash
-npm run dev
-```
-
-### Production
-```bash
-npm start
-```
-
-### As systemd service
-
-See example in project README.
-
-## API Endpoints
-
-### Health
-- `GET /health` - Server health check
-- `GET /status/:agent` - Check agent token status
-
-### Teams
-- `POST /webhook/teams/:agent` - Teams webhook (Microsoft notifications)
-- `POST /api/teams/send` - Send Teams message (with optional attachments)
-- `POST /api/teams/upload` - Upload file to OneDrive, get sharing link
-
-### Email
-- `POST /webhook/email/:agent` - Email webhook (Microsoft notifications)
-- `GET /api/email/list/:agent?limit=10` - List emails
-- `GET /api/email/read/:agent/:messageId` - Read email
-- `POST /api/email/send` - Send email
-
-### Calendar
-- `POST /webhook/calendar/:agent` - Calendar webhook (Microsoft notifications)
-- `GET /api/calendar/list/:agent?days=7` - List calendar events
-- `POST /api/calendar/create` - Create calendar event
-
-### Subscriptions
-- `GET /api/subscription/list/:agent` - List active subscriptions
-- `POST /api/subscription/refresh/:agent` - Manually refresh all subscriptions
-- `DELETE /api/subscription/:agent/:subscriptionId` - Delete subscription
-
-## How It Works
-
-### Startup
-1. Loads agent configurations from `.env`
-2. Fetches user IDs for each agent via `/me` endpoint (for @mention detection)
-3. Starts subscription managers for each agent
-4. Auto-creates/renews webhooks every 5 minutes
-
-### Message Flow (Teams)
-
-1. **Microsoft Graph** sends webhook notification → middleware
-2. **Middleware** fetches message details from Graph API
-3. **Filters applied:**
-   - Own message? Skip (prevents loops)
-   - Old message? Skip (no backfill spam)
-   - Duplicate? Skip (seen before)
-   - Group chat? Check @mentions
-     - Not @mentioned? Skip (silence rule)
-     - @mentioned? Continue
-4. **Forward to agent gateway** if all filters pass
-5. **Agent processes** and responds
-6. **Agent's response** triggers webhook → filtered as "own message" → no loop
-
-## Subscription Configuration
-
-Edit `config/subscriptions.json` to define webhook resources for each agent:
-
-```json
-{
-  "max": [
-    {
-      "resource": "/me/chats/getAllMessages",
-      "changeType": "created",
-      "notificationUrl": "https://microsoft.acuity.expert/webhook/teams/max",
-      "clientState": "max-teams",
-      "maxExpirationMinutes": 60
-    }
-  ]
-}
-```
-
-## Security
-
-- All tokens stored in separate files (not in env)
-- `.env` excluded from git via `.gitignore`
-- Webhook validation via Microsoft's validation token
-- State tracking prevents replay attacks
-- Auto token refresh before expiry
-
-## Troubleshooting
-
-### No messages received
-1. Check subscription status: `curl http://localhost:3007/api/subscription/list/max`
-2. Check server logs: `tail -f server.log`
-3. Verify Cloudflare tunnel is routing to correct port
-
-### Token expired
-Tokens auto-refresh. If issues persist:
-1. Check token file exists and has `refresh_token`
-2. Verify Azure app has correct permissions
-3. Check server logs for token refresh errors
-
-### Group chat not working
-1. Verify `{AGENT}_DISPLAY_NAME` matches Teams display name exactly
-2. Check logs for "Fetched user ID" message at startup
-3. Test @mention in group chat
+- **Multi-agent support** - Configure multiple OpenClaw agents
+- **Microsoft Graph webhooks** - Teams messages, email, calendar events
+- **Auto token refresh** - Tokens are refreshed automatically
+- **Subscription management** - Auto-renew Graph subscriptions
+- **Systemd integration** - Easy service installation
 
 ## Architecture
 
 ```
-Microsoft Graph API
-       ↓ (webhook)
-Middleware Server (port 3007)
-       ↓ (HTTP POST)
-OpenClaw Agent Gateways (ports 18789, 19789, etc.)
-       ↓
-Agent Sessions
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│   Microsoft     │      │   Middleware    │      │    OpenClaw     │
+│   Graph API     │─────▶│   Server        │─────▶│    Gateway      │
+│                 │      │   (port 3007)   │      │                 │
+└─────────────────┘      └─────────────────┘      └─────────────────┘
+       │                         │
+       │  Webhooks              │  Forwards events
+       └─────────────────────────┘
 ```
+
+## Requirements
+
+- Node.js >= 18.0.0
+- Azure AD app registration with appropriate permissions
+- OpenClaw gateway running
 
 ## License
 
 MIT
-
-## Author
-
-Luca Licata

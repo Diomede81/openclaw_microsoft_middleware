@@ -4,12 +4,22 @@
  * Generates access token for Microsoft Graph API
  * 
  * Usage: 
- *   node generate-token.js                    # Uses .env defaults
- *   node generate-token.js --agent max        # Generate token for specific agent
+ *   ms-middleware token <agent>               # Via CLI
+ *   node generate-token.js --agent max        # Direct invocation
  *   AGENT_NAME=kim node generate-token.js     # Via environment variable
  */
 
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+const path = require('path');
+const fs = require('fs');
+
+// Load .env from cwd first, then package directory
+const cwdEnv = path.join(process.cwd(), '.env');
+const pkgEnv = path.join(__dirname, '..', '.env');
+if (fs.existsSync(cwdEnv)) {
+  require('dotenv').config({ path: cwdEnv });
+} else if (fs.existsSync(pkgEnv)) {
+  require('dotenv').config({ path: pkgEnv });
+}
 
 const http = require('http');
 const { exec } = require('child_process');
