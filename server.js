@@ -709,6 +709,12 @@ app.post('/webhook/calendar/:agent', async (req, res) => {
     return res.status(200).type('text/plain').send(validationToken);
   }
   
+  // Check if calendar notifications are disabled
+  if (process.env.FORWARD_CALENDAR_NOTIFICATIONS === 'false') {
+    console.log(`[${agent}] Calendar notification received but forwarding is DISABLED`);
+    return res.status(200).send('OK');
+  }
+  
   // Handle notifications
   try {
     const notifications = req.body.value || [];
