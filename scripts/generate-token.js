@@ -1,20 +1,53 @@
 #!/usr/bin/env node
 /**
- * OAuth Token Generator for Luca (llicata@tulip-tech.com)
+ * OAuth Token Generator - Templated Version
  * Generates access token for Microsoft Graph API
+ * 
+ * Usage: 
+ *   node generate-token.js                    # Uses .env defaults
+ *   node generate-token.js --agent max        # Generate token for specific agent
+ *   AGENT_NAME=kim node generate-token.js     # Via environment variable
  */
+
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
 const http = require('http');
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const CLIENT_ID = '79b3f60a-ddfe-4029-8af4-1c95a37c6aa7'; // Clawdbot Integration app
-const TENANT_ID = '982780f8-0424-4e57-9cc0-bee3d6acc797'; // tulip-tech.com tenant
-const REDIRECT_URI = 'http://localhost:3001/oauth/callback';
-const TOKEN_FILE = path.join(process.env.HOME, 'clawd', 'luca-microsoft-tokens.json');
+// Parse command line args
+const args = process.argv.slice(2);
+let agentName = process.env.AGENT_NAME || process.env.DEFAULT_AGENT || 'max';
 
-const SCOPES = [
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--agent' && args[i + 1]) {
+    agentName = args[i + 1];
+  }
+}
+
+agentName = agentName.toUpperCase();
+
+// Load agent config from environment
+const CLIENT_ID = process.env[`${agentName}_CLIENT_ID`];
+const TENANT_ID = process.env[`${agentName}_TENANT_ID`];
+const TOKEN_FILE = process.env[`${agentName}_TOKEN_FILE`];
+const DISPLAY_NAME = process.env[`${agentName}_DISPLAY_NAME`] || agentName;
+const OAUTH_PORT = parseInt(process.env.OAUTH_CALLBACK_PORT || '3001', 10);
+const REDIRECT_URI = process.env.OAUTH_REDIRECT_URI || `http://localhost:${OAUTH_PORT}/oauth/callback`;
+
+// Validate required config
+if (!CLIENT_ID || !TENANT_ID || !TOKEN_FILE) {
+  console.error(`\n❌ Missing configuration for agent: ${agentName}`);
+  console.error('\nRequired environment variables:');
+  console.error(`  ${agentName}_CLIENT_ID`);
+  console.error(`  ${agentName}_TENANT_ID`);
+  console.error(`  ${agentName}_TOKEN_FILE`);
+  console.error('\nEither set these in .env or pass --agent <name>\n');
+  process.exit(1);
+}
+
+const SCOPES = (process.env.OAUTH_SCOPES || [
   'User.Read',
   'Mail.Read',
   'Mail.ReadWrite',
@@ -33,7 +66,7 @@ const SCOPES = [
   'Presence.ReadWrite',
   'MailboxSettings.ReadWrite',
   'offline_access'
-].join(' ');
+].join(' '));
 
 // Authorization URL
 const authUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/authorize?` +
@@ -44,15 +77,18 @@ const authUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/auth
   `scope=${encodeURIComponent(SCOPES)}&` +
   `state=12345`;
 
-console.log('\n🔐 Luca Token Generator');
-console.log('========================\n');
-console.log('This will authenticate you (llicata@tulip-tech.com) and save your token.\n');
+console.log(`\n🔐 Token Generator for ${DISPLAY_NAME}`);
+console.log('='.repeat(30 + DISPLAY_NAME.length) + '\n');
+console.log(`Agent: ${agentName}`);
+console.log(`Client ID: ${CLIENT_ID.substring(0, 8)}...`);
+console.log(`Tenant ID: ${TENANT_ID.substring(0, 8)}...`);
+console.log(`Token File: ${TOKEN_FILE}\n`);
 console.log('Opening browser for authentication...\n');
 
 // Start local server to catch redirect
 const server = http.createServer(async (req, res) => {
   if (req.url.startsWith('/oauth/callback')) {
-    const url = new URL(req.url, `http://localhost:3001`);
+    const url = new URL(req.url, `http://localhost:${OAUTH_PORT}`);
     const code = url.searchParams.get('code');
     
     if (!code) {
@@ -85,8 +121,15 @@ const server = http.createServer(async (req, res) => {
         throw new Error(`Token error: ${tokenData.error_description || tokenData.error}`);
       }
       
-      // Add timestamp
+      // Add metadata
       tokenData.obtained_at = Date.now();
+      tokenData.agent = agentName.toLowerCase();
+      
+      // Ensure directory exists
+      const tokenDir = path.dirname(TOKEN_FILE);
+      if (!fs.existsSync(tokenDir)) {
+        fs.mkdirSync(tokenDir, { recursive: true });
+      }
       
       // Save token
       fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenData, null, 2), { mode: 0o600 });
@@ -110,6 +153,7 @@ const server = http.createServer(async (req, res) => {
         <head><title>Authentication Successful</title></head>
         <body style="font-family: system-ui; max-width: 600px; margin: 100px auto; text-align: center;">
           <h1 style="color: green;">✅ Authentication Successful!</h1>
+          <p><strong>Agent:</strong> ${DISPLAY_NAME}</p>
           <p><strong>User:</strong> ${userData.displayName}</p>
           <p><strong>Email:</strong> ${userData.userPrincipalName}</p>
           <p>Token saved to:<br><code>${TOKEN_FILE}</code></p>
@@ -129,8 +173,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(3001, () => {
-  console.log('Local server listening on http://localhost:3001\n');
+server.listen(OAUTH_PORT, () => {
+  console.log(`Local server listening on http://localhost:${OAUTH_PORT}\n`);
   
   // Open browser
   const openCommand = process.platform === 'darwin' ? 'open' : 
