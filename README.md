@@ -50,6 +50,7 @@ systemctl --user start ms-middleware
 |-------|-------------|
 | [AGENT_INSTALL_GUIDE.md](./AGENT_INSTALL_GUIDE.md) | Complete installation walkthrough |
 | [AGENT_TEAMS_SETUP.md](./AGENT_TEAMS_SETUP.md) | Teams integration for agents |
+| [SESSIONS.md](./SESSIONS.md) | **Session persistence and conversation history** |
 | [TOKEN_MANAGEMENT.md](./TOKEN_MANAGEMENT.md) | OAuth token lifecycle |
 | [SETUP.md](./SETUP.md) | Azure AD app registration |
 
