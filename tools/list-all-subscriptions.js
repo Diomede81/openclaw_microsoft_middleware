@@ -1,105 +1,164 @@
 #!/usr/bin/env node
+/**
+ * List All Microsoft Graph Subscriptions - Templated Version
+ * 
+ * Usage:
+ *   node list-all-subscriptions.js                 # List for all configured agents
+ *   node list-all-subscriptions.js --agent max     # List for specific agent
+ */
+
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+
 const fs = require('fs');
 
-const agents = [
-  {
-    name: 'max',
-    clientId: '79b3f60a-ddfe-4029-8af4-1c95a37c6aa7',
-    tenantId: '982780f8-0424-4e57-9cc0-bee3d6acc797',
-    tokenFile: '/home/lucalicata/clawd/max-microsoft-tokens.json'
-  },
-  {
-    name: 'sophia',
-    clientId: '50d301c0-ad4f-458b-95ec-f3c966f60f6c',
-    tenantId: 'f2b38637-cb43-45b5-a5e8-e7a09fe436bb',
-    tokenFile: '/home/lucalicata/clawd/sophia-microsoft-tokens.json'
-  }
-];
+// Parse command line args
+const args = process.argv.slice(2);
+let specificAgent = null;
 
-async function getAccessToken(agent) {
-  const tokens = JSON.parse(fs.readFileSync(agent.tokenFile, 'utf8'));
-  const expiresAt = tokens.obtained_at + (tokens.expires_in * 1000);
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--agent' && args[i + 1]) {
+    specificAgent = args[i + 1].toUpperCase();
+  }
+}
+
+// Get enabled agents from environment
+function getEnabledAgents() {
+  const enabled = process.env.ENABLED_AGENTS;
+  if (!enabled) {
+    // Auto-detect from environment variables
+    const agents = [];
+    const envKeys = Object.keys(process.env);
+    const agentPattern = /^([A-Z]+)_CLIENT_ID$/;
+    
+    for (const key of envKeys) {
+      const match = key.match(agentPattern);
+      if (match) {
+        agents.push(match[1]);
+      }
+    }
+    return agents;
+  }
+  return enabled.split(',').map(a => a.trim().toUpperCase());
+}
+
+// Load agent config
+function loadAgentConfig(agentName) {
+  const prefix = agentName.toUpperCase();
+  const clientId = process.env[`${prefix}_CLIENT_ID`];
+  const tenantId = process.env[`${prefix}_TENANT_ID`];
+  const tokenFile = process.env[`${prefix}_TOKEN_FILE`];
   
-  if (Date.now() > expiresAt - 300000) {
+  if (!clientId || !tenantId || !tokenFile) {
+    return null;
+  }
+  
+  return { name: agentName, clientId, tenantId, tokenFile };
+}
+
+// Refresh token if needed
+async function refreshToken(config) {
+  if (!fs.existsSync(config.tokenFile)) {
+    console.log(`  ⚠️ Token file not found: ${config.tokenFile}`);
+    return null;
+  }
+  
+  const tokenData = JSON.parse(fs.readFileSync(config.tokenFile, 'utf8'));
+  
+  // Check if token needs refresh (within 5 minutes of expiry)
+  const expiresAt = (tokenData.obtained_at || 0) + ((tokenData.expires_in || 3600) * 1000);
+  const needsRefresh = Date.now() > (expiresAt - 300000);
+  
+  if (needsRefresh && tokenData.refresh_token) {
     const response = await fetch(
-      `https://login.microsoftonline.com/${agent.tenantId}/oauth2/v2.0/token`,
+      `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
-          client_id: agent.clientId,
-          refresh_token: tokens.refresh_token,
+          client_id: config.clientId,
           grant_type: 'refresh_token',
-          scope: 'https://graph.microsoft.com/.default'
+          refresh_token: tokenData.refresh_token,
+          scope: tokenData.scope || 'https://graph.microsoft.com/.default offline_access'
         })
       }
     );
     
-    const newTokens = await response.json();
-    newTokens.obtained_at = Date.now();
-    fs.writeFileSync(agent.tokenFile, JSON.stringify(newTokens, null, 2));
-    return newTokens.access_token;
-  }
-  
-  return tokens.access_token;
-}
-
-async function listSubscriptions(agent) {
-  const token = await getAccessToken(agent);
-  const response = await fetch('https://graph.microsoft.com/v1.0/subscriptions', {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  
-  const data = await response.json();
-  return data.value || [];
-}
-
-async function deleteSubscription(agent, subId) {
-  const token = await getAccessToken(agent);
-  await fetch(`https://graph.microsoft.com/v1.0/subscriptions/${subId}`, {
-    method: 'DELETE',
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-}
-
-async function main() {
-  const action = process.argv[2] || 'list';
-  
-  for (const agent of agents) {
-    console.log(`\n=== ${agent.name.toUpperCase()} ===`);
-    
-    try {
-      const subs = await listSubscriptions(agent);
-      
-      if (subs.length === 0) {
-        console.log('No active subscriptions');
-        continue;
-      }
-      
-      console.log(`Found ${subs.length} active subscriptions:\n`);
-      
-      for (const sub of subs) {
-        console.log(`ID: ${sub.id}`);
-        console.log(`Resource: ${sub.resource}`);
-        console.log(`Notification URL: ${sub.notificationUrl}`);
-        console.log(`Client State: ${sub.clientState}`);
-        console.log(`Expires: ${sub.expirationDateTime}`);
-        console.log('---');
-        
-        if (action === 'delete') {
-          console.log(`Deleting ${sub.id}...`);
-          await deleteSubscription(agent, sub.id);
-          console.log('✓ Deleted\n');
-        }
-      }
-    } catch (error) {
-      console.error(`Error: ${error.message}`);
+    const newToken = await response.json();
+    if (newToken.access_token) {
+      newToken.obtained_at = Date.now();
+      fs.writeFileSync(config.tokenFile, JSON.stringify(newToken, null, 2), { mode: 0o600 });
+      return newToken.access_token;
     }
   }
   
-  if (action === 'list') {
-    console.log('\nTo delete all subscriptions, run: node list-all-subscriptions.js delete');
+  return tokenData.access_token;
+}
+
+// List subscriptions for an agent
+async function listSubscriptions(config) {
+  console.log(`\n📋 ${config.name}`);
+  console.log('─'.repeat(40));
+  
+  const accessToken = await refreshToken(config);
+  if (!accessToken) {
+    console.log('  ❌ Could not get access token');
+    return;
+  }
+  
+  const response = await fetch('https://graph.microsoft.com/v1.0/subscriptions', {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  
+  const data = await response.json();
+  
+  if (data.error) {
+    console.log(`  ❌ Error: ${data.error.message}`);
+    return;
+  }
+  
+  if (!data.value || data.value.length === 0) {
+    console.log('  No active subscriptions');
+    return;
+  }
+  
+  for (const sub of data.value) {
+    const expiresAt = new Date(sub.expirationDateTime);
+    const now = new Date();
+    const hoursLeft = Math.round((expiresAt - now) / 3600000);
+    
+    console.log(`\n  📌 ${sub.resource}`);
+    console.log(`     ID: ${sub.id}`);
+    console.log(`     Type: ${sub.changeType}`);
+    console.log(`     Expires: ${expiresAt.toISOString()} (${hoursLeft}h remaining)`);
+    console.log(`     Webhook: ${sub.notificationUrl}`);
   }
 }
 
-main().catch(console.error);
+async function main() {
+  console.log('\n🔍 Microsoft Graph Subscriptions');
+  console.log('=================================');
+  
+  const agents = specificAgent ? [specificAgent] : getEnabledAgents();
+  
+  if (agents.length === 0) {
+    console.log('\n❌ No agents configured. Set ENABLED_AGENTS or add agent config to .env\n');
+    process.exit(1);
+  }
+  
+  for (const agentName of agents) {
+    const config = loadAgentConfig(agentName);
+    if (!config) {
+      console.log(`\n⚠️ Skipping ${agentName} - missing configuration`);
+      continue;
+    }
+    
+    await listSubscriptions(config);
+  }
+  
+  console.log('\n');
+}
+
+main().catch(err => {
+  console.error('Error:', err.message);
+  process.exit(1);
+});
