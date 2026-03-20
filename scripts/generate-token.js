@@ -11,6 +11,9 @@
 
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
+const { exec } = require('child_process');
+const TokenManager = require('../lib/token-manager');
 
 // Load .env from cwd first, then package directory
 const cwdEnv = path.join(process.cwd(), '.env');
@@ -21,10 +24,10 @@ if (fs.existsSync(cwdEnv)) {
   require('dotenv').config({ path: pkgEnv });
 }
 
-const http = require('http');
-const { exec } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+// Initialize token manager
+const tokenManager = new TokenManager({
+  tokenDbPath: process.env.TOKEN_DB_PATH || null
+});
 
 // Parse command line args
 const args = process.argv.slice(2);
@@ -135,14 +138,8 @@ const server = http.createServer(async (req, res) => {
       tokenData.obtained_at = Date.now();
       tokenData.agent = agentName.toLowerCase();
       
-      // Ensure directory exists
-      const tokenDir = path.dirname(TOKEN_FILE);
-      if (!fs.existsSync(tokenDir)) {
-        fs.mkdirSync(tokenDir, { recursive: true });
-      }
-      
-      // Save token
-      fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenData, null, 2), { mode: 0o600 });
+      // Save via TokenManager (handles both file and DB)
+      tokenManager.setTokens(agentName.toLowerCase(), tokenData, TOKEN_FILE);
       
       // Verify who we authenticated as
       const userResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
