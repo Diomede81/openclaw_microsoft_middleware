@@ -21,12 +21,14 @@ Microsoft Graph API
 │  (agent hooks)    │
 └───────────────────┘
         │
-        ▼ (agent uses script)
+        ▼ (agent calls API)
 ┌───────────────────┐
-│  Teams Reply      │
-│  Script           │  ← Sends reply via Graph API
+│  Middleware       │
+│  POST /api/reply  │  ← Sends reply via Graph API
 └───────────────────┘
 ```
+
+**Key Change (v1.1.0+):** Agents now use the middleware's `/api/reply/:agent` endpoint instead of custom scripts. This is plug-and-play with no per-agent setup needed.
 
 ## Prerequisites
 
@@ -95,9 +97,46 @@ Add to the agent's OpenClaw config (`~/.openclaw-newagent/openclaw.json`):
 
 The `token` must match `NEWAGENT_GATEWAY_TOKEN` in the middleware `.env`.
 
-### 4. Create Teams Reply Script
+### 4. Configure Agent to Reply on Teams
 
-Create a script for the agent to send Teams replies. Save as `<workspace>/newagent-teams-reply.js`:
+**Option A: Using Middleware API (Recommended - v1.1.0+)**
+
+Add to agent's `TOOLS.md` or `workspace/README.md`:
+
+```markdown
+## Microsoft Teams Reply
+
+When you receive a Teams message, the chatId is provided in the webhook.
+
+To reply:
+```bash
+curl -X POST "http://localhost:3007/api/reply/<agent-name>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chatId": "<chatId-from-webhook>",
+    "message": "<p>Your HTML reply</p>"
+  }'
+```
+
+Example:
+```bash
+curl -X POST "http://localhost:3007/api/reply/newagent" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chatId": "19:xxx@unq.gbl.spaces",
+    "message": "<p>Hello! I received your message.</p>"
+  }'
+```
+
+**Benefits:**
+- ✅ No custom scripts needed
+- ✅ Middleware handles token management
+- ✅ Replies stored in session history automatically
+- ✅ Works for any agent configured in middleware
+
+**Option B: Custom Reply Script (Legacy)**
+
+If you need a custom script (for special logic), create `<workspace>/newagent-teams-reply.js`:
 
 ```javascript
 #!/usr/bin/env node
@@ -261,12 +300,11 @@ If the agent had the `msteams` plugin enabled, disable it since the middleware h
 - [ ] Agent added to middleware `.env` with correct credentials
 - [ ] OAuth token generated for agent
 - [ ] Agent gateway hooks configured with matching token
-- [ ] Teams reply script created in agent workspace
-- [ ] TOOLS.md updated with Teams reply command
+- [ ] TOOLS.md updated with `/api/reply/:agent` endpoint documentation
 - [ ] msteams plugin disabled (if previously enabled)
 - [ ] Middleware restarted after config changes
 - [ ] Agent gateway restarted after config changes
-- [ ] End-to-end test successful
+- [ ] End-to-end test successful (send Teams message → agent replies)
 
 ---
 
