@@ -509,7 +509,7 @@ curl "http://localhost:3007/api/email/search/max?q=invoice&top=5"
 ```
 
 #### POST /api/email/send
-Send a new email.
+Send a new email with optional attachments.
 
 **Request Body:**
 ```json
@@ -517,8 +517,46 @@ Send a new email.
   "agent": "max",
   "to": "recipient@example.com",
   "subject": "Hello",
-  "body": "<p>Email body in HTML</p>"
+  "body": "<p>Email body in HTML</p>",
+  "attachments": [
+    {
+      "name": "report.csv",
+      "path": "/path/to/file.csv",
+      "contentType": "text/csv"
+    }
+  ]
 }
+```
+
+**Attachment Options:**
+- `path`: File system path (automatically read and base64 encoded)
+- `contentBytes`: Pre-encoded base64 string
+- `buffer`: Raw buffer (will be encoded)
+- `name`: Filename (required)
+- `contentType`: MIME type (optional, defaults to `application/octet-stream`)
+
+**Example with multiple attachments:**
+```bash
+curl -X POST "http://localhost:3007/api/email/send" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent": "max",
+    "to": "user@example.com",
+    "subject": "Monthly Reports",
+    "body": "<p>Please find attached reports</p>",
+    "attachments": [
+      {
+        "name": "sales.csv",
+        "path": "/data/sales.csv",
+        "contentType": "text/csv"
+      },
+      {
+        "name": "summary.pdf",
+        "path": "/data/summary.pdf",
+        "contentType": "application/pdf"
+      }
+    ]
+  }'
 ```
 
 #### POST /api/email/reply
